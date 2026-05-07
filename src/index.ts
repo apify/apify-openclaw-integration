@@ -1,4 +1,4 @@
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { createApifyScraperTool } from "./tools/apify-scraper-tool.js";
 import { registerCli } from "./cli.js";
 

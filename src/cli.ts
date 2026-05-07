@@ -1,5 +1,5 @@
 import readline from "readline";
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { normalizeSecretInput } from "./util.js";
 import { createApifyClient, DEFAULT_APIFY_BASE_URL } from "./apify-client.js";
 
