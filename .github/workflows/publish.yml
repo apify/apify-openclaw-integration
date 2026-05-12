@@ -41,15 +41,6 @@ jobs:
           echo "Updating package.json to version ${{ env.VERSION }}"
           npm version "${{ env.VERSION }}" --no-git-tag-version
 
-      - name: Sync openclaw to latest npm version
-        run: |
-          LATEST=$(npm view openclaw version)
-          echo "Latest openclaw on npm: $LATEST"
-          echo "LATEST_OPENCLAW=$LATEST" >> $GITHUB_ENV
-          npm install --save-dev "openclaw@$LATEST"
-          npm pkg set "openclaw.compat.builtWithOpenClawVersion=$LATEST"
-          npm pkg set "openclaw.compat.pluginSdkVersion=$LATEST"
-
       - name: Type check
         run: npx tsc --noEmit
 
@@ -61,13 +52,13 @@ jobs:
           git config --global user.name "Apify Release Bot"
           git config --global user.email "noreply@apify.com"
 
-      - name: Commit version & openclaw sync
+      - name: Commit version bump
         run: |
           git add package.json package-lock.json
           if ! git diff --staged --quiet; then
             TARGET_BRANCH="${{ github.event.release.target_commitish }}"
             echo "Target branch for push: $TARGET_BRANCH"
-            git commit -m "chore(release): v${{ env.VERSION }} (openclaw=${{ env.LATEST_OPENCLAW }}) [skip ci]"
+            git commit -m "chore(release): v${{ env.VERSION }} [skip ci]"
             git push origin HEAD:"refs/heads/$TARGET_BRANCH"
           else
             echo "No changes to commit."
