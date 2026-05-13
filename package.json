@@ -31,6 +31,7 @@
   ],
   "files": [
     "src/",
+    "scripts/",
     "openclaw.plugin.json",
     "README.md",
     "LICENSE"
