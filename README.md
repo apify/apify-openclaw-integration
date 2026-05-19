@@ -18,11 +18,14 @@ Version 0.2.0 renamed the plugin id from `apify` to `apify-openclaw-plugin` to m
 Failed to update apify: plugin id mismatch: expected apify, got apify-openclaw-plugin
 ```
 
-Run the migration script once **before** updating:
+Download and run the migration script once **before** updating:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/apify/apify-openclaw-plugin/main/scripts/migrate-id.mjs | node
+curl -fsSL https://raw.githubusercontent.com/apify/apify-openclaw-plugin/main/scripts/migrate-id.mjs -o /tmp/apify-migrate-id.mjs
+node /tmp/apify-migrate-id.mjs
 ```
+
+(Inspect `/tmp/apify-migrate-id.mjs` first if you prefer.)
 
 Then update normally:
 

@@ -4,7 +4,7 @@
 // which makes `openclaw plugins update apify` fail with a "plugin id mismatch" error for
 // users coming from v0.1.x. Run this once before updating.
 //
-// Idempotent. No backup. Strips JSON5 comments if your config has them — see README.
+// Idempotent. No backup. Requires strict JSON — JSON5 (comments / trailing commas) is rejected; see README.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -63,7 +63,7 @@ function needsMigration(cfg) {
 }
 
 // Mirrors openclaw's migratePluginConfigId (node_modules/openclaw/dist/update-*.js).
-export function migrate(cfg) {
+function migrate(cfg) {
   if (!needsMigration(cfg)) return { cfg, changes: [] };
 
   const changes = [];
@@ -145,6 +145,4 @@ function main() {
   console.log(`Next: openclaw plugins update ${NEW_ID}`);
 }
 
-// Only run main when executed directly, not when imported by tests.
-const isMain = import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("migrate-id.mjs");
-if (isMain) main();
+main();
