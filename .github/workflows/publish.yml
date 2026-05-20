@@ -1,0 +1,79 @@
+name: Release & Publish to npm
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.APIFY_SERVICE_ACCOUNT_GITHUB_TOKEN }}
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+
+      - name: Set up Node.js & cache npm
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Extract release version
+        run: |
+          FULL_TAG_NAME="${{ github.event.release.tag_name }}"
+          VERSION_NUMBER="${FULL_TAG_NAME#v}"
+          echo "VERSION=${VERSION_NUMBER}" >> $GITHUB_ENV
+
+      - name: Update package.json version
+        run: |
+          echo "Updating package.json to version ${{ env.VERSION }}"
+          npm version "${{ env.VERSION }}" --no-git-tag-version
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Run tests
+        run: npx vitest run
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "Apify Release Bot"
+          git config --global user.email "noreply@apify.com"
+
+      - name: Commit version bump
+        run: |
+          git add package.json package-lock.json
+          if ! git diff --staged --quiet; then
+            TARGET_BRANCH="${{ github.event.release.target_commitish }}"
+            echo "Target branch for push: $TARGET_BRANCH"
+            git commit -m "chore(release): v${{ env.VERSION }} [skip ci]"
+            git push origin HEAD:"refs/heads/$TARGET_BRANCH"
+          else
+            echo "No changes to commit."
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.APIFY_SERVICE_ACCOUNT_GITHUB_TOKEN }}
+
+      - name: Publish to npm
+        run: |
+          if npm view @apify/apify-openclaw-plugin@${{ env.VERSION }} version > /dev/null 2>&1; then
+            echo "Version ${{ env.VERSION }} of @apify/apify-openclaw-plugin is already published to npm. Skipping publish step."
+          else
+            echo "Publishing @apify/apify-openclaw-plugin@${{ env.VERSION }} to npm..."
+            npm publish --provenance --access public
+          fi
