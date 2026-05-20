@@ -117,6 +117,24 @@ jobs:
 
           echo "OK: plugin loaded and apify tool is registered on openclaw ${{ matrix.version }}"
 
+  # Stable aggregator check — mark THIS one as required in branch protection.
+  # The matrix job names ("OpenClaw 2026.5.X") rotate as discovery picks up new
+  # versions, but this job's name never changes.
+  required:
+    needs: [discover, test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: All OpenClaw version tests must pass
+        shell: bash
+        run: |
+          if [[ "${{ needs.discover.result }}" != "success" || "${{ needs.test.result }}" != "success" ]]; then
+            echo "discover=${{ needs.discover.result }} test=${{ needs.test.result }}"
+            echo "One or more OpenClaw version tests failed."
+            exit 1
+          fi
+          echo "All OpenClaw version tests passed."
+
   # Slack notification on scheduled failure — disabled for now.
   # To re-enable: uncomment this job and set the `SLACK_WEBHOOK_URL` repo secret.
   #
