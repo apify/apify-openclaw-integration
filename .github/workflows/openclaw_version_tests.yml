@@ -73,9 +73,10 @@ jobs:
           # On PRs, pack the PR's source and install that tarball. On schedule /
           # manual dispatch, install the currently-published @latest from npm.
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            echo "::group::npm pack (PR branch)"
+            echo "::group::npm install && npm pack (PR branch)"
             cd "$GITHUB_WORKSPACE"
-            tarball=$(npm pack --silent | tail -n 1)
+            npm install
+            tarball=$(npm pack | tail -n 1)
             PLUGIN_SPEC="$GITHUB_WORKSPACE/$tarball"
             echo "Packed: $PLUGIN_SPEC"
             echo "::endgroup::"
