@@ -59,6 +59,8 @@ jobs:
       matrix:
         version: ${{ fromJson(needs.discover.outputs.versions) }}
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -67,6 +69,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # On PRs, pack the PR's source and install that tarball. On schedule /
+          # manual dispatch, install the currently-published @latest from npm.
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            echo "::group::npm pack (PR branch)"
+            cd "$GITHUB_WORKSPACE"
+            tarball=$(npm pack --silent | tail -n 1)
+            PLUGIN_SPEC="$GITHUB_WORKSPACE/$tarball"
+            echo "Packed: $PLUGIN_SPEC"
+            echo "::endgroup::"
+          else
+            PLUGIN_SPEC="@apify/apify-openclaw-plugin@latest"
+            echo "Using published spec: $PLUGIN_SPEC"
+          fi
 
           WORKDIR="$RUNNER_TEMP/openclaw-test"
           mkdir -p "$WORKDIR"
@@ -77,8 +93,8 @@ jobs:
           npm install "openclaw@${{ matrix.version }}"
           echo "::endgroup::"
 
-          echo "::group::openclaw plugins install @apify/apify-openclaw-plugin@latest"
-          npx --no-install openclaw plugins install @apify/apify-openclaw-plugin@latest
+          echo "::group::openclaw plugins install $PLUGIN_SPEC"
+          npx --no-install openclaw plugins install "$PLUGIN_SPEC"
           echo "::endgroup::"
 
           echo "::group::openclaw plugins list"
