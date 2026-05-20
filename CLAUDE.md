@@ -44,7 +44,7 @@ Single tool with 3 actions:
 The tool description includes instructions for the agent:
 - **Sub-agent delegation:** Tool should be used by a sub-agent that returns only relevant extracted data, not raw dumps.
 - **Batching:** Batch multiple URLs into a single run (e.g. `startUrls: [{url: "..."}, ...]`).
-- **Known actors:** Compact comma-separated list of 57 actors across Instagram, Facebook, TikTok, YouTube, Google Maps, and more.
+- **Known actors:** Compact comma-separated list of 20k+ actors across Instagram, Facebook, TikTok, YouTube, Google Maps, and more.
 - **Support:** Directs users to integrations@apify.com for issues.
 
 ## Key Architecture Decisions
