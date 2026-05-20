@@ -57,8 +57,8 @@
     "id": "apify-openclaw-plugin",
     "compat": {
       "pluginApi": ">=1.0.0",
-      "builtWithOpenClawVersion": "2026.4.15",
-      "pluginSdkVersion": "2026.4.15"
+      "builtWithOpenClawVersion": "2026.5.18",
+      "pluginSdkVersion": "2026.5.18"
     },
     "extensions": [
       "./src/index.ts"
