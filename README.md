@@ -10,6 +10,33 @@ openclaw plugins install @apify/apify-openclaw-plugin
 
 Restart the Gateway after installation.
 
+## Upgrading from 0.1.x to 0.2.x
+
+Version 0.2.0 renamed the plugin id from `apify` to `apify-openclaw-plugin` to match the unscoped npm package name. If you installed 0.1.x, `openclaw plugins update apify` will fail with:
+
+```
+Failed to update apify: plugin id mismatch: expected apify, got apify-openclaw-plugin
+```
+
+Download and run the migration script once **before** updating:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/apify/apify-openclaw-plugin/main/scripts/migrate-id.mjs -o /tmp/apify-migrate-id.mjs
+node /tmp/apify-migrate-id.mjs
+```
+
+(Inspect `/tmp/apify-migrate-id.mjs` first if you prefer.)
+
+Then update normally:
+
+```bash
+openclaw plugins update apify-openclaw-plugin
+```
+
+The script reads `~/.openclaw/openclaw.json` (or `$OPENCLAW_CONFIG_PATH`), renames the `apify` id to `apify-openclaw-plugin` in `plugins.installs`, `plugins.entries`, `plugins.allow`, `plugins.deny`, and `plugins.slots.memory`, then writes the file back. It is safe to re-run.
+
+**Note:** if your config is JSON5 (has comments or trailing commas), the script will refuse to parse it — apply the rename by hand instead.
+
 ## How it works
 
 The plugin registers a single tool — `apify` — with three actions:
