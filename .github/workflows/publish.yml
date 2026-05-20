@@ -50,6 +50,9 @@ jobs:
       - name: Run tests
         run: npx vitest run
 
+      - name: Build
+        run: npm run build
+
       - name: Configure Git
         run: |
           git config --global user.name "Apify Release Bot"

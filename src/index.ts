@@ -6,7 +6,7 @@ export default {
   id: "apify-openclaw-plugin",
   name: "Apify",
   description:
-    "Web scraping and data extraction via Apify — scrape any platform using 57+ actors across social media, maps, search, e-commerce, and more.",
+    "Web scraping and data extraction via Apify — scrape any platform using 20k+ actors across social media, maps, search, e-commerce, and more.",
   register(api: OpenClawPluginApi) {
     const cfg = { pluginConfig: api.pluginConfig };
     const tool = createApifyScraperTool(cfg);
