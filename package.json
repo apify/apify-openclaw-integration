@@ -1,6 +1,6 @@
 {
   "name": "@apify/apify-openclaw-plugin",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Web scraping and AI-powered data extraction via Apify for OpenClaw — market research, competitor intelligence, trend analysis, lead generation, e-commerce, social media analytics, and more.",
   "type": "module",
   "license": "MIT",
