@@ -1,0 +1,118 @@
+name: OpenClaw Version Test
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    # Mondays 08:00 UTC ≈ 9am Prague (CET winter) / 10am Prague (CEST summer).
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+jobs:
+  discover-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.filter.outputs.versions }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - id: filter
+        name: Discover supported OpenClaw versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Floor matches the peer-dep in package.json.
+          FLOOR="2026.4.15"
+
+          # Fetch every published openclaw version, drop pre-releases (anything with '-'),
+          # then keep only versions >= FLOOR using semver.
+          all=$(npm view openclaw versions --json)
+
+          stable=$(echo "$all" | jq -r '.[] | select(test("-") | not)')
+
+          versions=()
+          for v in $stable; do
+            if npx -y semver -r ">=$FLOOR" "$v" >/dev/null 2>&1; then
+              versions+=("$v")
+            fi
+          done
+
+          if [ ${#versions[@]} -eq 0 ]; then
+            echo "No supported OpenClaw versions found (floor=$FLOOR)." >&2
+            exit 1
+          fi
+
+          json=$(printf '%s\n' "${versions[@]}" | jq -R . | jq -sc .)
+          echo "versions=$json" >> "$GITHUB_OUTPUT"
+          echo "Matrix versions: $json"
+
+  compat:
+    needs: discover-versions
+    runs-on: ubuntu-latest
+    name: OpenClaw ${{ matrix.openclaw_version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        openclaw_version: ${{ fromJson(needs.discover-versions.outputs.versions) }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install OpenClaw ${{ matrix.openclaw_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/openclaw-test"
+          cd "$HOME/openclaw-test"
+          npm init -y >/dev/null
+          npm install "openclaw@${{ matrix.openclaw_version }}"
+
+      - name: Install plugin (@apify/apify-openclaw-plugin@latest)
+        shell: bash
+        working-directory: ${{ github.workspace }}/../openclaw-test
+        run: |
+          set -euo pipefail
+          npx --no-install openclaw plugins install @apify/apify-openclaw-plugin@latest
+
+      - name: Smoke test — plugin loads and apify tool is registered
+        shell: bash
+        working-directory: ${{ github.workspace }}/../openclaw-test
+        run: |
+          set -euo pipefail
+
+          echo "--- openclaw plugins list ---"
+          list_output=$(npx --no-install openclaw plugins list)
+          echo "$list_output"
+          if ! echo "$list_output" | grep -q "apify-openclaw-plugin"; then
+            echo "FAIL: apify-openclaw-plugin not present in 'plugins list' output" >&2
+            exit 1
+          fi
+
+          echo "--- openclaw plugins inspect apify-openclaw-plugin --runtime --json ---"
+          inspect_json=$(npx --no-install openclaw plugins inspect apify-openclaw-plugin --runtime --json)
+          echo "$inspect_json" | jq .
+
+          # Assert the plugin loaded and registered the `apify` tool. We accept any
+          # JSON shape that surfaces the tool name somewhere in the runtime output,
+          # since the exact schema may evolve across OpenClaw versions.
+          if ! echo "$inspect_json" | jq -e '.. | strings | select(. == "apify")' >/dev/null; then
+            echo "FAIL: 'apify' tool not found in plugin runtime inspect output" >&2
+            exit 1
+          fi
+
+          echo "OK: plugin loaded and apify tool is registered on openclaw ${{ matrix.openclaw_version }}"
+
+      - name: Upload failure artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compat-failure-${{ matrix.openclaw_version }}
+          path: |
+            ~/.openclaw/
+            ~/openclaw-test/npm-debug.log*
+          if-no-files-found: ignore
