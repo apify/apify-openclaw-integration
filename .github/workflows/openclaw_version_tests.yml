@@ -17,7 +17,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: Test plugin install against every supported OpenClaw version
+      - name: Test plugin install against every supported OpenClaw version (parallel)
         shell: bash
         run: |
           set -uo pipefail
@@ -40,40 +40,69 @@ jobs:
             echo "No supported OpenClaw versions found (floor=$FLOOR)." >&2
             exit 1
           fi
-          echo "Will test: ${versions[*]}"
+          echo "Will test in parallel: ${versions[*]}"
           echo "::endgroup::"
 
-          declare -A results
-          overall_pass=1
+          LOGDIR=$(mktemp -d)
 
           test_one() {
             local version="$1"
+            local logfile="$2"
             local workdir
             workdir=$(mktemp -d)
             cd "$workdir"
 
-            npm init -y >/dev/null 2>&1 || return 1
-            npm install "openclaw@${version}" >/dev/null 2>&1 || return 1
-            npx --no-install openclaw plugins install @apify/apify-openclaw-plugin@latest >/dev/null 2>&1 || return 2
+            {
+              echo "=== OpenClaw $version ==="
+              npm init -y >/dev/null 2>&1 || { echo "STEP_FAILED: npm init"; exit 1; }
+              echo "[1/4] npm install openclaw@${version}"
+              npm install "openclaw@${version}" 2>&1 || { echo "STEP_FAILED: npm install openclaw"; exit 1; }
 
-            local list_output
-            list_output=$(npx --no-install openclaw plugins list 2>&1) || return 3
-            echo "$list_output" | grep -q "apify-openclaw-plugin" || return 4
+              echo "[2/4] openclaw plugins install @apify/apify-openclaw-plugin@latest"
+              npx --no-install openclaw plugins install @apify/apify-openclaw-plugin@latest 2>&1 || { echo "STEP_FAILED: plugins install"; exit 2; }
 
-            local inspect_json
-            inspect_json=$(npx --no-install openclaw plugins inspect apify-openclaw-plugin --runtime --json 2>&1) || return 5
-            echo "$inspect_json" | jq -e '.. | strings | select(. == "apify")' >/dev/null 2>&1 || return 6
+              echo "[3/4] openclaw plugins list"
+              list_output=$(npx --no-install openclaw plugins list 2>&1) || { echo "STEP_FAILED: plugins list errored"; echo "$list_output"; exit 3; }
+              echo "$list_output"
+              echo "$list_output" | grep -q "apify-openclaw-plugin" || { echo "STEP_FAILED: plugin missing from list"; exit 4; }
 
-            return 0
+              echo "[4/4] openclaw plugins inspect apify-openclaw-plugin --runtime --json"
+              inspect_json=$(npx --no-install openclaw plugins inspect apify-openclaw-plugin --runtime --json 2>&1) || { echo "STEP_FAILED: plugins inspect errored"; echo "$inspect_json"; exit 5; }
+              echo "$inspect_json"
+              echo "$inspect_json" | jq -e '.. | strings | select(. == "apify")' >/dev/null 2>&1 || { echo "STEP_FAILED: 'apify' tool not found in inspect output"; exit 6; }
+
+              echo "RESULT: PASS"
+              exit 0
+            } >"$logfile" 2>&1
           }
 
+          # Launch all version tests in parallel.
+          declare -A pid_for
           for v in "${versions[@]}"; do
-            echo "::group::Testing OpenClaw $v"
-            if test_one "$v"; then
-              echo "PASS — OpenClaw $v"
+            logfile="$LOGDIR/$v.log"
+            test_one "$v" "$logfile" &
+            pid_for["$v"]=$!
+          done
+
+          # Wait for each and collect exit codes.
+          declare -A exit_for
+          for v in "${versions[@]}"; do
+            wait "${pid_for[$v]}"
+            exit_for["$v"]=$?
+          done
+
+          # Replay each per-version log inside a collapsible group, then summarize.
+          declare -A results
+          overall_pass=1
+          for v in "${versions[@]}"; do
+            code=${exit_for[$v]}
+            echo "::group::OpenClaw $v $( [ "$code" -eq 0 ] && echo '(PASS)' || echo '(FAIL)' )"
+            cat "$LOGDIR/$v.log"
+            echo "::endgroup::"
+
+            if [ "$code" -eq 0 ]; then
               results["$v"]="✅ PASS"
             else
-              code=$?
               case $code in
                 1) reason="npm install openclaw failed" ;;
                 2) reason="openclaw plugins install failed" ;;
@@ -83,17 +112,15 @@ jobs:
                 6) reason="'apify' tool not found in inspect output" ;;
                 *) reason="unknown error (code $code)" ;;
               esac
-              echo "FAIL — OpenClaw $v — $reason"
               results["$v"]="❌ FAIL — $reason"
               overall_pass=0
             fi
-            echo "::endgroup::"
           done
 
           {
             echo "# OpenClaw Version Test Results"
             echo ""
-            echo "Tested install of \`@apify/apify-openclaw-plugin@latest\` against ${#versions[@]} stable OpenClaw version(s) (>= $FLOOR)."
+            echo "Tested install of \`@apify/apify-openclaw-plugin@latest\` against ${#versions[@]} stable OpenClaw version(s) (>= $FLOOR), in parallel."
             echo ""
             echo "| OpenClaw Version | Result |"
             echo "|---|---|"
