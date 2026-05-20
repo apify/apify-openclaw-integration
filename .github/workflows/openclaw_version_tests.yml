@@ -4,23 +4,60 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    # Mondays 08:00 UTC ≈ 9am Prague (CET winter) / 10am Prague (CEST summer).
-    - cron: "0 8 * * 1"
+    # Mondays 07:00 UTC — 8am Prague in winter (CET), 9am Prague in summer (CEST).
+    - cron: "0 7 * * 1"
   workflow_dispatch:
 
 jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.filter.outputs.versions }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - id: filter
+        name: Pick latest 3 supported OpenClaw versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Floor matches the peer-dep in package.json.
+          FLOOR="2026.4.15"
+
+          # Drop pre-releases (anything with '-'), keep versions >= FLOOR,
+          # sort by semver, take the latest 3.
+          versions=$(
+            npm view openclaw versions --json \
+              | jq -r '.[] | select(test("-") | not)' \
+              | while read -r v; do
+                  if npx -y semver -r ">=$FLOOR" "$v" >/dev/null 2>&1; then
+                    echo "$v"
+                  fi
+                done \
+              | sort -V \
+              | tail -n 3
+          )
+
+          if [ -z "$versions" ]; then
+            echo "No supported OpenClaw versions found (floor=$FLOOR)." >&2
+            exit 1
+          fi
+
+          json=$(echo "$versions" | jq -R . | jq -sc .)
+          echo "versions=$json" >> "$GITHUB_OUTPUT"
+          echo "Selected versions: $json"
+
   test:
+    needs: discover
     runs-on: ubuntu-latest
     name: OpenClaw ${{ matrix.version }}
     strategy:
       fail-fast: false
       matrix:
-        # Hardcoded for now. TODO: re-enable dynamic discovery against npm
-        # ("npm view openclaw versions") to keep this list auto-updated.
-        version:
-          - "2026.5.7"
-          - "2026.5.12"
-          - "2026.5.18"
+        version: ${{ fromJson(needs.discover.outputs.versions) }}
     steps:
       - uses: actions/setup-node@v4
         with:
