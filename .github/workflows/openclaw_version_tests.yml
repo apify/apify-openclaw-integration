@@ -1,0 +1,164 @@
+name: OpenClaw Version Test
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    # Mondays 07:00 UTC — 8am Prague in winter (CET), 9am Prague in summer (CEST).
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.filter.outputs.versions }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - id: filter
+        name: Pick latest 3 supported OpenClaw versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Floor matches the peer-dep in package.json.
+          FLOOR="2026.4.15"
+
+          # Drop pre-releases (anything with '-'), keep versions >= FLOOR,
+          # sort by semver, take the latest 3.
+          versions=$(
+            npm view openclaw versions --json \
+              | jq -r '.[] | select(test("-") | not)' \
+              | while read -r v; do
+                  if npx -y semver -r ">=$FLOOR" "$v" >/dev/null 2>&1; then
+                    echo "$v"
+                  fi
+                done \
+              | sort -V \
+              | tail -n 3
+          )
+
+          if [ -z "$versions" ]; then
+            echo "No supported OpenClaw versions found (floor=$FLOOR)." >&2
+            exit 1
+          fi
+
+          json=$(echo "$versions" | jq -R . | jq -sc .)
+          echo "versions=$json" >> "$GITHUB_OUTPUT"
+          echo "Selected versions: $json"
+
+  test:
+    needs: discover
+    runs-on: ubuntu-latest
+    name: OpenClaw ${{ matrix.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.discover.outputs.versions) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install OpenClaw ${{ matrix.version }} and smoke-test plugin
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # On PRs, pack the PR's source and install that tarball. On schedule /
+          # manual dispatch, install the currently-published @latest from npm.
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            echo "::group::npm pack (PR branch)"
+            cd "$GITHUB_WORKSPACE"
+            tarball=$(npm pack --silent | tail -n 1)
+            PLUGIN_SPEC="$GITHUB_WORKSPACE/$tarball"
+            echo "Packed: $PLUGIN_SPEC"
+            echo "::endgroup::"
+          else
+            PLUGIN_SPEC="@apify/apify-openclaw-plugin@latest"
+            echo "Using published spec: $PLUGIN_SPEC"
+          fi
+
+          WORKDIR="$RUNNER_TEMP/openclaw-test"
+          mkdir -p "$WORKDIR"
+          cd "$WORKDIR"
+
+          echo "::group::npm install openclaw@${{ matrix.version }}"
+          npm init -y >/dev/null
+          npm install "openclaw@${{ matrix.version }}"
+          echo "::endgroup::"
+
+          echo "::group::openclaw plugins install $PLUGIN_SPEC"
+          npx --no-install openclaw plugins install "$PLUGIN_SPEC"
+          echo "::endgroup::"
+
+          echo "::group::openclaw plugins list"
+          list_output=$(npx --no-install openclaw plugins list)
+          echo "$list_output"
+          if ! echo "$list_output" | grep -q "apify-openclaw-plugin"; then
+            echo "FAIL: apify-openclaw-plugin not present in 'plugins list' output" >&2
+            exit 1
+          fi
+          echo "::endgroup::"
+
+          echo "::group::openclaw plugins inspect apify-openclaw-plugin --runtime --json"
+          inspect_json=$(npx --no-install openclaw plugins inspect apify-openclaw-plugin --runtime --json)
+          echo "$inspect_json" | jq .
+          if ! echo "$inspect_json" | jq -e '.. | strings | select(. == "apify")' >/dev/null; then
+            echo "FAIL: 'apify' tool not found in plugin runtime inspect output" >&2
+            exit 1
+          fi
+          echo "::endgroup::"
+
+          echo "OK: plugin loaded and apify tool is registered on openclaw ${{ matrix.version }}"
+
+  # Stable aggregator check — mark THIS one as required in branch protection.
+  # The matrix job names ("OpenClaw 2026.5.X") rotate as discovery picks up new
+  # versions, but this job's name never changes.
+  required:
+    needs: [discover, test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: All OpenClaw version tests must pass
+        shell: bash
+        run: |
+          if [[ "${{ needs.discover.result }}" != "success" || "${{ needs.test.result }}" != "success" ]]; then
+            echo "discover=${{ needs.discover.result }} test=${{ needs.test.result }}"
+            echo "One or more OpenClaw version tests failed."
+            exit 1
+          fi
+          echo "All OpenClaw version tests passed."
+
+  # Slack notification on scheduled failure — disabled for now.
+  # To re-enable: uncomment this job and set the `SLACK_WEBHOOK_URL` repo secret.
+  #
+  # notify:
+  #   needs: test
+  #   if: always() && needs.test.result == 'failure' && github.event_name == 'schedule'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Notify Slack on scheduled failure
+  #       env:
+  #         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  #         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+  #       shell: bash
+  #       run: |
+  #         if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+  #           echo "SLACK_WEBHOOK_URL secret not configured — skipping notification."
+  #           exit 0
+  #         fi
+  #
+  #         payload=$(jq -nc \
+  #           --arg text "🚨 *OpenClaw Version Test failed* (scheduled run)
+  #         One or more OpenClaw versions failed the plugin install smoke test.
+  #         <${RUN_URL}|View run details>" \
+  #           '{text: $text}')
+  #
+  #         curl -sS -X POST -H 'Content-Type: application/json' \
+  #           --data "$payload" "$SLACK_WEBHOOK_URL"
