@@ -50,24 +50,13 @@ jobs:
       - name: Run tests
         run: npx vitest run
 
-      - name: Configure Git
-        run: |
-          git config --global user.name "Apify Release Bot"
-          git config --global user.email "noreply@apify.com"
-
       - name: Commit version bump
-        run: |
-          git add package.json package-lock.json
-          if ! git diff --staged --quiet; then
-            TARGET_BRANCH="${{ github.event.release.target_commitish }}"
-            echo "Target branch for push: $TARGET_BRANCH"
-            git commit -m "chore(release): v${{ env.VERSION }} [skip ci]"
-            git push origin HEAD:"refs/heads/$TARGET_BRANCH"
-          else
-            echo "No changes to commit."
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.APIFY_SERVICE_ACCOUNT_GITHUB_TOKEN }}
+        uses: apify/actions/signed-commit@v1.1.2
+        with:
+          message: "chore(release): v${{ env.VERSION }} [skip ci]"
+          add: 'package.json package-lock.json'
+          github-token: ${{ secrets.APIFY_SERVICE_ACCOUNT_GITHUB_TOKEN }}
+          branch: ${{ github.event.release.target_commitish }}
 
       - name: Publish to npm
         run: |
