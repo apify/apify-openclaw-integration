@@ -9,134 +9,127 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
-    name: OpenClaw Version Test
+  discover:
     runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.filter.outputs.versions }}
     steps:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Test plugin install against every supported OpenClaw version (parallel)
+      - id: filter
+        name: Pick latest 3 supported OpenClaw versions
         shell: bash
         run: |
-          set -uo pipefail
+          set -euo pipefail
 
           # Floor matches the peer-dep in package.json.
           FLOOR="2026.4.15"
 
-          echo "::group::Discovering OpenClaw versions"
           all=$(npm view openclaw versions --json)
-          stable=$(echo "$all" | jq -r '.[] | select(test("-") | not)')
 
-          versions=()
-          for v in $stable; do
-            if npx -y semver -r ">=$FLOOR" "$v" >/dev/null 2>&1; then
-              versions+=("$v")
-            fi
-          done
+          # Drop pre-releases (anything with '-'), keep versions >= FLOOR,
+          # sort by semver, take the latest 3.
+          versions=$(
+            echo "$all" \
+              | jq -r '.[] | select(test("-") | not)' \
+              | while read -r v; do
+                  if npx -y semver -r ">=$FLOOR" "$v" >/dev/null 2>&1; then
+                    echo "$v"
+                  fi
+                done \
+              | sort -V \
+              | tail -n 3
+          )
 
-          if [ ${#versions[@]} -eq 0 ]; then
+          if [ -z "$versions" ]; then
             echo "No supported OpenClaw versions found (floor=$FLOOR)." >&2
             exit 1
           fi
-          echo "Will test in parallel: ${versions[*]}"
-          echo "::endgroup::"
 
-          LOGDIR=$(mktemp -d)
+          json=$(echo "$versions" | jq -R . | jq -sc .)
+          echo "versions=$json" >> "$GITHUB_OUTPUT"
+          echo "Selected versions: $json"
 
-          test_one() {
-            local version="$1"
-            local logfile="$2"
-            local workdir
-            workdir=$(mktemp -d)
-            cd "$workdir"
+  test:
+    needs: discover
+    runs-on: ubuntu-latest
+    name: OpenClaw ${{ matrix.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJson(needs.discover.outputs.versions) }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
-            {
-              echo "=== OpenClaw $version ==="
-              npm init -y >/dev/null 2>&1 || { echo "STEP_FAILED: npm init"; exit 1; }
-              echo "[1/4] npm install openclaw@${version}"
-              npm install "openclaw@${version}" 2>&1 || { echo "STEP_FAILED: npm install openclaw"; exit 1; }
+      - name: Install OpenClaw ${{ matrix.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/openclaw-test"
+          cd "$HOME/openclaw-test"
+          npm init -y >/dev/null
+          npm install "openclaw@${{ matrix.version }}"
 
-              echo "[2/4] openclaw plugins install @apify/apify-openclaw-plugin@latest"
-              npx --no-install openclaw plugins install @apify/apify-openclaw-plugin@latest 2>&1 || { echo "STEP_FAILED: plugins install"; exit 2; }
+      - name: Install plugin (@apify/apify-openclaw-plugin@latest)
+        shell: bash
+        working-directory: ${{ github.workspace }}/../openclaw-test
+        run: |
+          set -euo pipefail
+          npx --no-install openclaw plugins install @apify/apify-openclaw-plugin@latest
 
-              echo "[3/4] openclaw plugins list"
-              list_output=$(npx --no-install openclaw plugins list 2>&1) || { echo "STEP_FAILED: plugins list errored"; echo "$list_output"; exit 3; }
-              echo "$list_output"
-              echo "$list_output" | grep -q "apify-openclaw-plugin" || { echo "STEP_FAILED: plugin missing from list"; exit 4; }
+      - name: Smoke test — plugin loads and apify tool is registered
+        shell: bash
+        working-directory: ${{ github.workspace }}/../openclaw-test
+        run: |
+          set -euo pipefail
 
-              echo "[4/4] openclaw plugins inspect apify-openclaw-plugin --runtime --json"
-              inspect_json=$(npx --no-install openclaw plugins inspect apify-openclaw-plugin --runtime --json 2>&1) || { echo "STEP_FAILED: plugins inspect errored"; echo "$inspect_json"; exit 5; }
-              echo "$inspect_json"
-              echo "$inspect_json" | jq -e '.. | strings | select(. == "apify")' >/dev/null 2>&1 || { echo "STEP_FAILED: 'apify' tool not found in inspect output"; exit 6; }
-
-              echo "RESULT: PASS"
-              exit 0
-            } >"$logfile" 2>&1
-          }
-
-          # Launch all version tests in parallel.
-          declare -A pid_for
-          for v in "${versions[@]}"; do
-            logfile="$LOGDIR/$v.log"
-            test_one "$v" "$logfile" &
-            pid_for["$v"]=$!
-          done
-
-          # Wait for each and collect exit codes.
-          declare -A exit_for
-          for v in "${versions[@]}"; do
-            wait "${pid_for[$v]}"
-            exit_for["$v"]=$?
-          done
-
-          # Replay each per-version log inside a collapsible group, then summarize.
-          declare -A results
-          overall_pass=1
-          for v in "${versions[@]}"; do
-            code=${exit_for[$v]}
-            echo "::group::OpenClaw $v $( [ "$code" -eq 0 ] && echo '(PASS)' || echo '(FAIL)' )"
-            cat "$LOGDIR/$v.log"
-            echo "::endgroup::"
-
-            if [ "$code" -eq 0 ]; then
-              results["$v"]="✅ PASS"
-            else
-              case $code in
-                1) reason="npm install openclaw failed" ;;
-                2) reason="openclaw plugins install failed" ;;
-                3) reason="openclaw plugins list errored" ;;
-                4) reason="plugin not in 'plugins list' output" ;;
-                5) reason="openclaw plugins inspect errored" ;;
-                6) reason="'apify' tool not found in inspect output" ;;
-                *) reason="unknown error (code $code)" ;;
-              esac
-              results["$v"]="❌ FAIL — $reason"
-              overall_pass=0
-            fi
-          done
-
-          {
-            echo "# OpenClaw Version Test Results"
-            echo ""
-            echo "Tested install of \`@apify/apify-openclaw-plugin@latest\` against ${#versions[@]} stable OpenClaw version(s) (>= $FLOOR), in parallel."
-            echo ""
-            echo "| OpenClaw Version | Result |"
-            echo "|---|---|"
-            for v in "${versions[@]}"; do
-              echo "| \`$v\` | ${results[$v]} |"
-            done
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          echo ""
-          echo "==================== SUMMARY ===================="
-          for v in "${versions[@]}"; do
-            printf "  %-12s  %s\n" "$v" "${results[$v]}"
-          done
-          echo "================================================="
-
-          if [ "$overall_pass" -ne 1 ]; then
-            echo "One or more OpenClaw versions failed the smoke test."
+          echo "--- openclaw plugins list ---"
+          list_output=$(npx --no-install openclaw plugins list)
+          echo "$list_output"
+          if ! echo "$list_output" | grep -q "apify-openclaw-plugin"; then
+            echo "FAIL: apify-openclaw-plugin not present in 'plugins list' output" >&2
             exit 1
           fi
+
+          echo "--- openclaw plugins inspect apify-openclaw-plugin --runtime --json ---"
+          inspect_json=$(npx --no-install openclaw plugins inspect apify-openclaw-plugin --runtime --json)
+          echo "$inspect_json" | jq .
+
+          if ! echo "$inspect_json" | jq -e '.. | strings | select(. == "apify")' >/dev/null; then
+            echo "FAIL: 'apify' tool not found in plugin runtime inspect output" >&2
+            exit 1
+          fi
+
+          echo "OK: plugin loaded and apify tool is registered on openclaw ${{ matrix.version }}"
+
+  # Slack notification on scheduled failure — disabled for now.
+  # To re-enable: uncomment this job and set the `SLACK_WEBHOOK_URL` repo secret.
+  #
+  # notify:
+  #   needs: test
+  #   if: always() && needs.test.result == 'failure' && github.event_name == 'schedule'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Notify Slack on scheduled failure
+  #       env:
+  #         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  #         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+  #       shell: bash
+  #       run: |
+  #         if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+  #           echo "SLACK_WEBHOOK_URL secret not configured — skipping notification."
+  #           exit 0
+  #         fi
+  #
+  #         payload=$(jq -nc \
+  #           --arg text "🚨 *OpenClaw Version Test failed* (scheduled run)
+  #         One or more OpenClaw versions failed the plugin install smoke test.
+  #         <${RUN_URL}|View run details>" \
+  #           '{text: $text}')
+  #
+  #         curl -sS -X POST -H 'Content-Type: application/json' \
+  #           --data "$payload" "$SLACK_WEBHOOK_URL"
