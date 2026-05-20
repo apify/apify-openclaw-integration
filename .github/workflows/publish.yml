@@ -88,4 +88,4 @@ jobs:
       ref: ${{ github.event.release.target_commitish }}
       owner: apify
     secrets:
-      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
+      clawhub_token: ${{ secrets.APIFY_CLAWHUB_TOKEN }}
