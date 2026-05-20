@@ -9,100 +9,58 @@ on:
   workflow_dispatch:
 
 jobs:
-  discover:
-    runs-on: ubuntu-latest
-    outputs:
-      versions: ${{ steps.filter.outputs.versions }}
-    steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - id: filter
-        name: Pick latest 3 supported OpenClaw versions
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          # Floor matches the peer-dep in package.json.
-          FLOOR="2026.4.15"
-
-          all=$(npm view openclaw versions --json)
-
-          # Drop pre-releases (anything with '-'), keep versions >= FLOOR,
-          # sort by semver, take the latest 3.
-          versions=$(
-            echo "$all" \
-              | jq -r '.[] | select(test("-") | not)' \
-              | while read -r v; do
-                  if npx -y semver -r ">=$FLOOR" "$v" >/dev/null 2>&1; then
-                    echo "$v"
-                  fi
-                done \
-              | sort -V \
-              | tail -n 3
-          )
-
-          if [ -z "$versions" ]; then
-            echo "No supported OpenClaw versions found (floor=$FLOOR)." >&2
-            exit 1
-          fi
-
-          json=$(echo "$versions" | jq -R . | jq -sc .)
-          echo "versions=$json" >> "$GITHUB_OUTPUT"
-          echo "Selected versions: $json"
-
   test:
-    needs: discover
     runs-on: ubuntu-latest
     name: OpenClaw ${{ matrix.version }}
     strategy:
       fail-fast: false
       matrix:
-        version: ${{ fromJson(needs.discover.outputs.versions) }}
+        # Hardcoded for now. TODO: re-enable dynamic discovery against npm
+        # ("npm view openclaw versions") to keep this list auto-updated.
+        version:
+          - "2026.5.7"
+          - "2026.5.12"
+          - "2026.5.18"
     steps:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Install OpenClaw ${{ matrix.version }}
+      - name: Install OpenClaw ${{ matrix.version }} and smoke-test plugin
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$HOME/openclaw-test"
-          cd "$HOME/openclaw-test"
+
+          WORKDIR="$RUNNER_TEMP/openclaw-test"
+          mkdir -p "$WORKDIR"
+          cd "$WORKDIR"
+
+          echo "::group::npm install openclaw@${{ matrix.version }}"
           npm init -y >/dev/null
           npm install "openclaw@${{ matrix.version }}"
+          echo "::endgroup::"
 
-      - name: Install plugin (@apify/apify-openclaw-plugin@latest)
-        shell: bash
-        working-directory: ${{ github.workspace }}/../openclaw-test
-        run: |
-          set -euo pipefail
+          echo "::group::openclaw plugins install @apify/apify-openclaw-plugin@latest"
           npx --no-install openclaw plugins install @apify/apify-openclaw-plugin@latest
+          echo "::endgroup::"
 
-      - name: Smoke test — plugin loads and apify tool is registered
-        shell: bash
-        working-directory: ${{ github.workspace }}/../openclaw-test
-        run: |
-          set -euo pipefail
-
-          echo "--- openclaw plugins list ---"
+          echo "::group::openclaw plugins list"
           list_output=$(npx --no-install openclaw plugins list)
           echo "$list_output"
           if ! echo "$list_output" | grep -q "apify-openclaw-plugin"; then
             echo "FAIL: apify-openclaw-plugin not present in 'plugins list' output" >&2
             exit 1
           fi
+          echo "::endgroup::"
 
-          echo "--- openclaw plugins inspect apify-openclaw-plugin --runtime --json ---"
+          echo "::group::openclaw plugins inspect apify-openclaw-plugin --runtime --json"
           inspect_json=$(npx --no-install openclaw plugins inspect apify-openclaw-plugin --runtime --json)
           echo "$inspect_json" | jq .
-
           if ! echo "$inspect_json" | jq -e '.. | strings | select(. == "apify")' >/dev/null; then
             echo "FAIL: 'apify' tool not found in plugin runtime inspect output" >&2
             exit 1
           fi
+          echo "::endgroup::"
 
           echo "OK: plugin loaded and apify tool is registered on openclaw ${{ matrix.version }}"
 
