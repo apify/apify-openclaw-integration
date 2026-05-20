@@ -191,3 +191,4 @@ All scraped data is **untrusted external content**. The `wrapExternalContent(con
 5. **`workspace:*` deps break outside the monorepo.** We use `"openclaw": "^2026.2.18"` in devDependencies.
 6. **Plugin tools are gated by allowlists.** Users must add tool names or `group:plugins` to `tools.alsoAllow`.
 7. **No `Type.Union` in schemas.** OpenClaw rejects `anyOf`/`oneOf`/`allOf`. Use `stringEnum()` and `Type.Optional()`.
+8. **Don't rename the plugin id.** It was renamed `apify` → `apify-openclaw-plugin` between v0.1.0 and v0.2.0 and broke every existing user's update flow (OpenClaw's installer rejects id mismatches before any migration logic runs). `scripts/migrate-id.mjs` exists as the user-facing workaround. If a future rename is unavoidable, ship another migration script and document it in the README.
