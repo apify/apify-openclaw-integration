@@ -27,6 +27,17 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: npm
 
+      # npm trusted publishing (OIDC) needs npm >= 11.5. Node 22 ships npm 10.x,
+      # so we upgrade. Running `npm install -g npm@latest` with the bundled npm
+      # races against itself (it overwrites its own files mid-execution, then
+      # fails to `require` removed internal modules). Use npx to fetch
+      # npm@latest into a separate location and let *that* npm do the global
+      # install — running process and target path are distinct, no race.
+      - name: Upgrade npm for trusted publishing
+        run: |
+          npx -y npm@latest install -g npm@latest
+          npm --version
+
       - name: Install dependencies
         run: npm ci
 
