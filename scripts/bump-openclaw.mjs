@@ -199,6 +199,7 @@ function applyBump(latest) {
     [
       "pkg",
       "set",
+      `openclaw.build.openclawVersion=${latest}`,
       `openclaw.compat.builtWithOpenClawVersion=${latest}`,
       `openclaw.compat.pluginSdkVersion=${latest}`,
     ],
