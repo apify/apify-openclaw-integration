@@ -20,7 +20,8 @@
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "bump:openclaw": "node scripts/bump-openclaw.mjs"
   },
   "keywords": [
     "openclaw",
@@ -59,7 +60,7 @@
     }
   },
   "devDependencies": {
-    "openclaw": "^2026.5.18",
+    "openclaw": "^2026.5.19",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
@@ -67,8 +68,8 @@
     "id": "apify-openclaw-plugin",
     "compat": {
       "pluginApi": ">=1.0.0",
-      "builtWithOpenClawVersion": "2026.5.18",
-      "pluginSdkVersion": "2026.5.18"
+      "builtWithOpenClawVersion": "2026.5.19",
+      "pluginSdkVersion": "2026.5.19"
     },
     "extensions": [
       "./dist/index.js"
