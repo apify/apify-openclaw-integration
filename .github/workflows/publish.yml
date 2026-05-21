@@ -1,4 +1,4 @@
-name: Release & Publish to npm
+name: Release & Publish to npm and ClawHub
 
 on:
   release:
@@ -77,3 +77,16 @@ jobs:
             echo "Publishing @apify/apify-openclaw-plugin@${{ env.VERSION }} to npm..."
             npm publish --provenance --access public
           fi
+
+  publish-clawhub:
+    needs: release
+    permissions:
+      contents: read
+      id-token: write
+    uses: openclaw/clawhub/.github/workflows/package-publish.yml@v0.12.0
+    with:
+      dry_run: false
+      ref: ${{ github.event.release.target_commitish }}
+      owner: apify
+    secrets:
+      clawhub_token: ${{ secrets.APIFY_CLAWHUB_TOKEN }}
