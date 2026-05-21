@@ -45,3 +45,4 @@ jobs:
           echo "All openclaw version fields are up to date ($LATEST)."
       - run: npx tsc --noEmit
       - run: npx vitest run
+      - run: npm run build

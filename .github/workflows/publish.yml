@@ -50,6 +50,9 @@ jobs:
       - name: Run tests
         run: npx vitest run
 
+      - name: Build
+        run: npm run build
+
       - name: Commit version bump
         uses: apify/actions/signed-commit@v1.1.2
         with:

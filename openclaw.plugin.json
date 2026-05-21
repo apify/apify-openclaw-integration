@@ -1,7 +1,10 @@
 {
   "id": "apify-openclaw-plugin",
   "name": "Apify",
-  "description": "Universal web scraping and data extraction via Apify — scrape any platform using 57+ Actors across social media, maps, search, e-commerce, and more.",
+  "description": "Universal web scraping and data extraction via Apify — scrape any platform using 20k+ Actors across social media, maps, search, e-commerce, and more.",
+  "contracts": {
+    "tools": ["apify"]
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

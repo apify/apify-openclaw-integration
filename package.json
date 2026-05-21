@@ -13,6 +13,16 @@
     "url": "https://github.com/apify/apify-openclaw-plugin/issues"
   },
   "homepage": "https://github.com/apify/apify-openclaw-plugin#readme",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build",
+    "bump:openclaw": "node scripts/bump-openclaw.mjs"
+  },
   "keywords": [
     "openclaw",
     "apify",
@@ -30,6 +40,7 @@
     "facebook"
   ],
   "files": [
+    "dist/",
     "src/",
     "scripts/",
     "openclaw.plugin.json",
@@ -49,7 +60,7 @@
     }
   },
   "devDependencies": {
-    "openclaw": "^2026.5.18",
+    "openclaw": "^2026.5.19",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
@@ -57,11 +68,11 @@
     "id": "apify-openclaw-plugin",
     "compat": {
       "pluginApi": ">=1.0.0",
-      "builtWithOpenClawVersion": "2026.5.18",
-      "pluginSdkVersion": "2026.5.18"
+      "builtWithOpenClawVersion": "2026.5.19",
+      "pluginSdkVersion": "2026.5.19"
     },
     "extensions": [
-      "./src/index.ts"
+      "./dist/index.js"
     ]
   }
 }

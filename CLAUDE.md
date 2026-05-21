@@ -44,7 +44,7 @@ Single tool with 3 actions:
 The tool description includes instructions for the agent:
 - **Sub-agent delegation:** Tool should be used by a sub-agent that returns only relevant extracted data, not raw dumps.
 - **Batching:** Batch multiple URLs into a single run (e.g. `startUrls: [{url: "..."}, ...]`).
-- **Known actors:** Compact comma-separated list of 57 actors across Instagram, Facebook, TikTok, YouTube, Google Maps, and more.
+- **Known actors:** Compact comma-separated list of 20k+ actors across Instagram, Facebook, TikTok, YouTube, Google Maps, and more.
 - **Support:** Directs users to integrations@apify.com for issues.
 
 ## Key Architecture Decisions
@@ -79,7 +79,45 @@ The wizard merges safely: preserves existing config, adds to `tools.alsoAllow` w
 - **Type-check:** `npx tsc --noEmit`
 - **Test:** `npx vitest run`
 - **Pack (dry run):** `npm pack --dry-run`
+- **Bump OpenClaw to latest:** `npm run bump:openclaw` *(install-tests against the latest stable openclaw, then updates `devDependencies.openclaw` + both `compat` fields if it passes; user reviews and commits)*
 - **Current state:** 1 test file, 10 tests passing.
+
+## Updating the OpenClaw Version
+
+The `OpenClaw Version Test` workflow blocks any PR whose pinned openclaw version lags behind the latest stable on npm. To keep up:
+
+1. Run `npm run bump:openclaw`. The script packs the plugin, installs it against `openclaw@latest` in a temp directory, runs `plugins list` + `plugins inspect` (same smoke as CI), then runs local `typecheck` + `vitest`. If any step fails, no files are touched.
+2. On success, `package.json` (`devDependencies.openclaw`, `openclaw.compat.builtWithOpenClawVersion`, `openclaw.compat.pluginSdkVersion`) and `package-lock.json` are updated. Review `git diff`, then commit as `chore: bump openclaw to <version>`.
+3. `peerDependencies.openclaw` uses `">="` and is intentionally not touched.
+
+Claude should default to this script when asked to bump OpenClaw or when the version test is failing — do not run the underlying `npm install --save-dev openclaw@X` + `npm pkg set ...` commands manually.
+
+## CI Workflows
+
+### `ci.yml` — fast PR gate
+- Runs `npx tsc --noEmit` + `npx vitest run` on Node 22.
+- Triggers on push/PR to `main`.
+
+### `openclaw_version_tests.yml` — OpenClaw runtime compatibility matrix
+Validates the plugin actually installs and loads inside a real OpenClaw runtime.
+
+- **Triggers:**
+  - `pull_request` to `main` — packs the PR branch (`npm install && npm pack`) and installs that tarball, so each PR is validated against its own diff.
+  - `schedule` — Mondays at `07:00` UTC (`0 7 * * 1`), which is 8am Prague (CET) in winter / 9am Prague (CEST) in summer.
+  - `workflow_dispatch` — manual re-run.
+- **Schedule / dispatch mode:** installs `@apify/apify-openclaw-plugin@latest` from npm (validates the currently-shipping release).
+- **Versions tested:** the `discover` job calls `npm view openclaw versions --json`, drops pre-releases (anything containing `-`), `sort -V | tail -n 3` to pick the latest 3 stable versions. Auto-updates — no manual list maintenance.
+- **Smoke test per version:** all four phases run in **one consolidated bash step** that `cd`s to `$RUNNER_TEMP/openclaw-test` (splitting across steps with `working-directory:` caused a path mismatch — don't do that):
+  1. `npm install openclaw@<matrix-version>` in a fresh `$RUNNER_TEMP/openclaw-test` dir.
+  2. `npx openclaw plugins install <spec>` (tarball path on PR; `@latest` on schedule).
+  3. `npx openclaw plugins list` — must contain `apify-openclaw-plugin`.
+  4. `npx openclaw plugins inspect apify-openclaw-plugin --runtime --json` — must surface the `apify` tool name (matched loosely via `jq '.. | strings | select(. == "apify")'` since the JSON shape may evolve across OpenClaw versions).
+- **Aggregator job (`required`)** — runs after the matrix with `if: always()`, fails if `discover` or `test` didn't succeed. This is the **stable required status check** in branch protection — the per-version matrix legs (`OpenClaw 2026.x.y`) rotate as discovery picks up new releases, so don't pin those.
+- **Slack notification** — a `notify` job is scaffolded but commented out. To re-enable, uncomment it and add a `SLACK_WEBHOOK_URL` repo secret; it only fires on `schedule` failures.
+
+### Branch protection on `main`
+- `required` (the aggregator job above) is enforced as a required status check via the GitHub branch protection API.
+- Set up via `gh api -X PUT repos/apify/apify-openclaw-plugin/branches/main/protection --input -` with a JSON body — the flag-form `-F nested.key=value` doesn't work for the nested object schema.
 
 ## Coding Style
 
