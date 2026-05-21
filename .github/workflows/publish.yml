@@ -47,10 +47,25 @@ jobs:
           VERSION_NUMBER="${FULL_TAG_NAME#v}"
           echo "VERSION=${VERSION_NUMBER}" >> $GITHUB_ENV
 
-      - name: Update package.json version
+      # Make the bump idempotent: if a prior failed run already pushed the
+      # version commit to main, the tag points at a tree that already has the
+      # target version. `npm version X` errors out in that case ("Version not
+      # changed"), so we pre-check and skip both the bump and the commit step.
+      - name: Check if version bump is needed
+        id: version_check
         run: |
-          echo "Updating package.json to version ${{ env.VERSION }}"
-          npm version "${{ env.VERSION }}" --no-git-tag-version
+          CURRENT=$(node -p "require('./package.json').version")
+          if [ "$CURRENT" = "${{ env.VERSION }}" ]; then
+            echo "package.json is already at ${{ env.VERSION }}, skipping bump."
+            echo "needs_bump=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "package.json is at $CURRENT, will bump to ${{ env.VERSION }}."
+            echo "needs_bump=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update package.json version
+        if: steps.version_check.outputs.needs_bump == 'true'
+        run: npm version "${{ env.VERSION }}" --no-git-tag-version
 
       - name: Type check
         run: npx tsc --noEmit
@@ -62,6 +77,7 @@ jobs:
         run: npm run build
 
       - name: Commit version bump
+        if: steps.version_check.outputs.needs_bump == 'true'
         uses: apify/actions/signed-commit@v1.1.2
         with:
           message: "chore(release): v${{ env.VERSION }} [skip ci]"
