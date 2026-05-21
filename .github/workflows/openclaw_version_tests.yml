@@ -19,30 +19,21 @@ jobs:
           node-version: 22
 
       - id: filter
-        name: Pick latest 3 supported OpenClaw versions
+        name: Pick latest 3 OpenClaw versions
         shell: bash
         run: |
           set -euo pipefail
 
-          # Floor matches the peer-dep in package.json.
-          FLOOR="2026.4.15"
-
-          # Drop pre-releases (anything with '-'), keep versions >= FLOOR,
-          # sort by semver, take the latest 3.
+          # Drop pre-releases (anything with '-'), sort by semver, take the latest 3.
           versions=$(
             npm view openclaw versions --json \
               | jq -r '.[] | select(test("-") | not)' \
-              | while read -r v; do
-                  if npx -y semver -r ">=$FLOOR" "$v" >/dev/null 2>&1; then
-                    echo "$v"
-                  fi
-                done \
               | sort -V \
               | tail -n 3
           )
 
           if [ -z "$versions" ]; then
-            echo "No supported OpenClaw versions found (floor=$FLOOR)." >&2
+            echo "No stable OpenClaw versions found on npm." >&2
             exit 1
           fi
 
