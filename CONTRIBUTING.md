@@ -14,7 +14,12 @@ CI (`.github/workflows/ci.yml`) runs the same checks on every PR and push to `ma
 
 ## Releasing a new version
 
-Releases are published to npm as [`@apify/apify-openclaw-plugin`](https://www.npmjs.com/package/@apify/apify-openclaw-plugin) by the GitHub Actions workflow at `.github/workflows/publish.yml`. The workflow triggers when a GitHub **release** is published (creating a tag alone is not enough).
+Releases are published to two registries by the GitHub Actions workflow at `.github/workflows/publish.yml`:
+
+- npm: [`@apify/apify-openclaw-plugin`](https://www.npmjs.com/package/@apify/apify-openclaw-plugin)
+- ClawHub: [`@apify/apify-openclaw-plugin`](https://clawhub.ai/plugins/@apify/apify-openclaw-plugin) (org: `apify`)
+
+The workflow triggers when a GitHub **release** is published (creating a tag alone is not enough). It needs three repo secrets configured: `APIFY_SERVICE_ACCOUNT_GITHUB_TOKEN` (commit the version bump back), `NPM_TOKEN` (publish to npm), `CLAWHUB_TOKEN` (publish to ClawHub).
 
 ### Step 1 — Bump openclaw to the latest version (separate PR)
 
@@ -44,15 +49,21 @@ Open a PR with the resulting `package.json` + `package-lock.json` diff, get it r
    - **Target**: `main`.
    - **Title / notes**: summarise the changes.
    - Click **Publish release**.
-4. Watch the **Actions** tab. The `Release & Publish to npm` workflow will:
-   1. Install dependencies (`npm ci`).
-   2. Bump `package.json` `version` to match the release tag (`npm version --no-git-tag-version`).
-   3. Run `npx tsc --noEmit` and `npx vitest run`.
-   4. Commit `package.json` + `package-lock.json` back to `main` as `chore(release): vX.Y.Z [skip ci]`.
-   5. Publish to npm with `--provenance --access public`. The step is idempotent: re-running the same release will detect the version is already on npm and skip the publish.
-5. Verify: `npm view @apify/apify-openclaw-plugin@X.Y.Z`.
+4. Watch the **Actions** tab. The workflow has two jobs:
+   - `release`:
+     1. Installs dependencies (`npm ci`).
+     2. Bumps `package.json` `version` to match the release tag (`npm version --no-git-tag-version`).
+     3. Runs `npx tsc --noEmit` and `npx vitest run`.
+     4. Commits `package.json` + `package-lock.json` back to `main` as `chore(release): vX.Y.Z [skip ci]`.
+     5. Publishes to npm with `--provenance --access public`. Idempotent: re-running the same release detects the version is already on npm and skips.
+   - `publish-clawhub` (runs after `release`):
+     - Calls the official reusable workflow `openclaw/clawhub/.github/workflows/package-publish.yml`.
+     - Passes `ref: ${{ github.event.release.target_commitish }}` so ClawHub fetches `main` **after** the version-bump commit has been pushed (the release tag itself still points at the pre-bump commit).
+     - Publishes under owner `apify`; family is auto-detected from `openclaw.plugin.json` (`code-plugin`).
+5. Verify: `npm view @apify/apify-openclaw-plugin@X.Y.Z` and `clawhub package inspect @apify/apify-openclaw-plugin --version X.Y.Z` (or check `https://clawhub.ai/plugins/@apify/apify-openclaw-plugin`).
 
 ### Recovery
 
 - **Workflow failed after the version-bump commit was pushed but before npm publish succeeded.** Just re-run the workflow; the bump commit will be a no-op and the publish step will retry.
+- **npm publish succeeded but ClawHub publish failed.** Re-run only the `publish-clawhub` job from the Actions tab. The reusable workflow re-fetches `main` so the bumped version is still picked up.
 - **You need to abandon a release entirely.** Delete the GitHub release **and** the tag, revert the `chore(release)` commit on `main`, and start over with a fresh tag.
