@@ -84,13 +84,13 @@ The wizard merges safely: preserves existing config, adds to `tools.alsoAllow` w
 
 ## Updating the OpenClaw Version
 
-The `OpenClaw Version Test` workflow blocks any PR whose pinned openclaw version lags behind the latest stable on npm. To keep up:
+The publish workflow blocks any GitHub release whose pinned openclaw version lags behind the latest stable on npm (OpenClaw ships ~daily, so this check is **not** enforced on every PR/commit — it would just be busy-work — only at release time). To keep up:
 
 1. Run `npm run bump:openclaw`. The script packs the plugin, installs it against `openclaw@latest` in a temp directory, runs `plugins list` + `plugins inspect` (same smoke as CI), then runs local `typecheck` + `vitest`. If any step fails, no files are touched.
 2. On success, `package.json` (`devDependencies.openclaw`, `openclaw.compat.builtWithOpenClawVersion`, `openclaw.compat.pluginSdkVersion`) and `package-lock.json` are updated. Review `git diff`, then commit as `chore: bump openclaw to <version>`.
 3. `peerDependencies.openclaw` uses `">="` and is intentionally not touched.
 
-Claude should default to this script when asked to bump OpenClaw or when the version test is failing — do not run the underlying `npm install --save-dev openclaw@X` + `npm pkg set ...` commands manually.
+Claude should default to this script when asked to bump OpenClaw or when the publish-time version gate fails — do not run the underlying `npm install --save-dev openclaw@X` + `npm pkg set ...` commands manually.
 
 ## CI Workflows
 
@@ -110,8 +110,8 @@ Validates the plugin actually installs and loads inside a real OpenClaw runtime.
 - **Smoke test per version:** all four phases run in **one consolidated bash step** that `cd`s to `$RUNNER_TEMP/openclaw-test` (splitting across steps with `working-directory:` caused a path mismatch — don't do that):
   1. `npm install openclaw@<matrix-version>` in a fresh `$RUNNER_TEMP/openclaw-test` dir.
   2. `npx openclaw plugins install <spec>` (tarball path on PR; `@latest` on schedule).
-  3. `npx openclaw plugins list` — must contain `apify-openclaw-plugin`.
-  4. `npx openclaw plugins inspect apify-openclaw-plugin --runtime --json` — must surface the `apify` tool name (matched loosely via `jq '.. | strings | select(. == "apify")'` since the JSON shape may evolve across OpenClaw versions).
+  3. `npx openclaw plugins list` — echoed for diagnostics only. **Do NOT grep this output:** the rendered table word-wraps long ids/paths across cells, so `apify-openclaw-plugin` rarely appears as a contiguous substring. A prior grep gate here broke against 2026.5.26 / 2026.5.27 when the npm install layout changed.
+  4. `npx openclaw plugins inspect apify-openclaw-plugin --runtime --json` — this is the real load assertion. `inspect` exits non-zero if the plugin id isn't registered, and the JSON is checked with `jq '.. | strings | select(. == "apify")'` to confirm the `apify` tool surfaces (matched loosely since the JSON shape may evolve across OpenClaw versions).
 - **Aggregator job (`required`)** — runs after the matrix with `if: always()`, fails if `discover` or `test` didn't succeed. This is the **stable required status check** in branch protection — the per-version matrix legs (`OpenClaw 2026.x.y`) rotate as discovery picks up new releases, so don't pin those.
 - **Slack notification** — a `notify` job is scaffolded but commented out. To re-enable, uncomment it and add a `SLACK_WEBHOOK_URL` repo secret; it only fires on `schedule` failures.
 
