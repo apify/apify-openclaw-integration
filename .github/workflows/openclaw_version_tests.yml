@@ -93,13 +93,13 @@ jobs:
           npx --no-install openclaw plugins install "$PLUGIN_SPEC"
           echo "::endgroup::"
 
+          # `plugins list` is echoed for diagnostics only — its formatted table
+          # word-wraps long ids/paths across cells, so any substring grep on it
+          # is brittle. The real load check is `plugins inspect` below, which
+          # exits non-zero if the plugin id isn't registered and returns JSON
+          # we can structurally assert on.
           echo "::group::openclaw plugins list"
-          list_output=$(npx --no-install openclaw plugins list)
-          echo "$list_output"
-          if ! echo "$list_output" | grep -q "apify-openclaw-plugin"; then
-            echo "FAIL: apify-openclaw-plugin not present in 'plugins list' output" >&2
-            exit 1
-          fi
+          npx --no-install openclaw plugins list || true
           echo "::endgroup::"
 
           echo "::group::openclaw plugins inspect apify-openclaw-plugin --runtime --json"

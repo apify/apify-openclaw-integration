@@ -110,8 +110,8 @@ Validates the plugin actually installs and loads inside a real OpenClaw runtime.
 - **Smoke test per version:** all four phases run in **one consolidated bash step** that `cd`s to `$RUNNER_TEMP/openclaw-test` (splitting across steps with `working-directory:` caused a path mismatch — don't do that):
   1. `npm install openclaw@<matrix-version>` in a fresh `$RUNNER_TEMP/openclaw-test` dir.
   2. `npx openclaw plugins install <spec>` (tarball path on PR; `@latest` on schedule).
-  3. `npx openclaw plugins list` — must contain `apify-openclaw-plugin`.
-  4. `npx openclaw plugins inspect apify-openclaw-plugin --runtime --json` — must surface the `apify` tool name (matched loosely via `jq '.. | strings | select(. == "apify")'` since the JSON shape may evolve across OpenClaw versions).
+  3. `npx openclaw plugins list` — echoed for diagnostics only. **Do NOT grep this output:** the rendered table word-wraps long ids/paths across cells, so `apify-openclaw-plugin` rarely appears as a contiguous substring. A prior grep gate here broke against 2026.5.26 / 2026.5.27 when the npm install layout changed.
+  4. `npx openclaw plugins inspect apify-openclaw-plugin --runtime --json` — this is the real load assertion. `inspect` exits non-zero if the plugin id isn't registered, and the JSON is checked with `jq '.. | strings | select(. == "apify")'` to confirm the `apify` tool surfaces (matched loosely since the JSON shape may evolve across OpenClaw versions).
 - **Aggregator job (`required`)** — runs after the matrix with `if: always()`, fails if `discover` or `test` didn't succeed. This is the **stable required status check** in branch protection — the per-version matrix legs (`OpenClaw 2026.x.y`) rotate as discovery picks up new releases, so don't pin those.
 - **Slack notification** — a `notify` job is scaffolded but commented out. To re-enable, uncomment it and add a `SLACK_WEBHOOK_URL` repo secret; it only fires on `schedule` failures.
 
