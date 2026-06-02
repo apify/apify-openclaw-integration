@@ -84,13 +84,13 @@ The wizard merges safely: preserves existing config, adds to `tools.alsoAllow` w
 
 ## Updating the OpenClaw Version
 
-The `OpenClaw Version Test` workflow blocks any PR whose pinned openclaw version lags behind the latest stable on npm. To keep up:
+The publish workflow blocks any GitHub release whose pinned openclaw version lags behind the latest stable on npm (OpenClaw ships ~daily, so this check is **not** enforced on every PR/commit — it would just be busy-work — only at release time). To keep up:
 
 1. Run `npm run bump:openclaw`. The script packs the plugin, installs it against `openclaw@latest` in a temp directory, runs `plugins list` + `plugins inspect` (same smoke as CI), then runs local `typecheck` + `vitest`. If any step fails, no files are touched.
 2. On success, `package.json` (`devDependencies.openclaw`, `openclaw.compat.builtWithOpenClawVersion`, `openclaw.compat.pluginSdkVersion`) and `package-lock.json` are updated. Review `git diff`, then commit as `chore: bump openclaw to <version>`.
 3. `peerDependencies.openclaw` uses `">="` and is intentionally not touched.
 
-Claude should default to this script when asked to bump OpenClaw or when the version test is failing — do not run the underlying `npm install --save-dev openclaw@X` + `npm pkg set ...` commands manually.
+Claude should default to this script when asked to bump OpenClaw or when the publish-time version gate fails — do not run the underlying `npm install --save-dev openclaw@X` + `npm pkg set ...` commands manually.
 
 ## CI Workflows
 
