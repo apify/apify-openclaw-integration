@@ -41,7 +41,7 @@
     "apiKey": {
       "label": "Apify API Key",
       "sensitive": true,
-      "help": "Get one at https://console.apify.com/settings/integrations"
+      "help": "Get one at https://console.apify.com/settings/integrations?utm_source=openclaw&utm_medium=integrations"
     },
     "enabled": {
       "label": "Enable Apify Plugin"
