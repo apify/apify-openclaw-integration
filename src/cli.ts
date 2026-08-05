@@ -185,7 +185,7 @@ async function runSetupCommand(api: OpenClawPluginApi): Promise<void> {
       console.log(`  ✓ API key already configured: ${existingKey.slice(0, 12)}…\n`);
       const change = await confirm(rl, "  Replace it with a new key?", false);
       if (change) {
-        apiKey = await ask(rl, "\n  Enter new API key (from console.apify.com/settings/integrations?utm_source=openclaw&utm_medium=integrations)");
+        apiKey = await ask(rl, "\n  Enter new API key (from https://console.apify.com/settings/integrations?utm_source=openclaw&utm_medium=integrations)");
         apiKey = normalizeSecretInput(apiKey);
       } else {
         apiKey = existingKey;
