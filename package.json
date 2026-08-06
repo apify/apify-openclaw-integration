@@ -60,19 +60,19 @@
     }
   },
   "devDependencies": {
-    "openclaw": "^2026.5.19",
+    "openclaw": "^2026.7.1-2",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
   "openclaw": {
     "id": "apify-openclaw-plugin",
     "build": {
-      "openclawVersion": "2026.5.19"
+      "openclawVersion": "2026.7.1-2"
     },
     "compat": {
       "pluginApi": ">=1.0.0",
-      "builtWithOpenClawVersion": "2026.5.19",
-      "pluginSdkVersion": "2026.5.19"
+      "builtWithOpenClawVersion": "2026.7.1-2",
+      "pluginSdkVersion": "2026.7.1-2"
     },
     "extensions": [
       "./dist/index.js"
