@@ -79,24 +79,47 @@ The wizard merges safely: preserves existing config, adds to `tools.alsoAllow` w
 - **Type-check:** `npx tsc --noEmit`
 - **Test:** `npx vitest run`
 - **Pack (dry run):** `npm pack --dry-run`
-- **Bump OpenClaw to latest:** `npm run bump:openclaw` *(install-tests against the latest stable openclaw, then updates `devDependencies.openclaw` + both `compat` fields if it passes; user reviews and commits)*
+- **Bump OpenClaw to latest:** `npm run bump:openclaw` *(install-tests against the latest openclaw release, then updates `devDependencies.openclaw` + the `build`/`compat` version fields if it passes; user reviews and commits)*
 - **Current state:** 1 test file, 10 tests passing.
 
 ## Updating the OpenClaw Version
 
-The publish workflow blocks any GitHub release whose pinned openclaw version lags behind the latest stable on npm (OpenClaw ships ~daily, so this check is **not** enforced on every PR/commit — it would just be busy-work — only at release time). To keep up:
+The publish workflow blocks any GitHub release whose pinned openclaw version lags behind the latest release on npm (OpenClaw ships ~daily, so this check is **not** enforced on every PR/commit — it would just be busy-work — only at release time). To keep up:
 
-1. Run `npm run bump:openclaw`. The script packs the plugin, installs it against `openclaw@latest` in a temp directory, runs `plugins list` + `plugins inspect` (same smoke as CI), then runs local `typecheck` + `vitest`. If any step fails, no files are touched.
-2. On success, `package.json` (`devDependencies.openclaw`, `openclaw.compat.builtWithOpenClawVersion`, `openclaw.compat.pluginSdkVersion`) and `package-lock.json` are updated. Review `git diff`, then commit as `chore: bump openclaw to <version>`.
+1. Run `npm run bump:openclaw`. The script packs the plugin, installs it against the latest openclaw release in a temp directory, runs `plugins list` + `plugins inspect` (same smoke as CI), then runs local `typecheck` + `vitest`. If any step fails, no files are touched.
+2. On success, `package.json` (`devDependencies.openclaw`, `openclaw.build.openclawVersion`, `openclaw.compat.builtWithOpenClawVersion`, `openclaw.compat.pluginSdkVersion`) and `package-lock.json` are updated. Review `git diff`, then commit as `chore: bump openclaw to <version>`.
 3. `peerDependencies.openclaw` uses `">="` and is intentionally not touched.
 
 Claude should default to this script when asked to bump OpenClaw or when the publish-time version gate fails — do not run the underlying `npm install --save-dev openclaw@X` + `npm pkg set ...` commands manually.
 
+### `scripts/openclaw-version.mjs` — the single source of truth
+
+All three consumers (the bump script, the publish gate, the version-test matrix) resolve "latest openclaw" through this one module. Keep it that way — when they disagreed, releases deadlocked.
+
+**The `X.Y.Z-N` trap.** OpenClaw respins a patch as `2026.7.1-1`, `2026.7.1-2`, … and moves the `latest` dist-tag onto it. Strict semver reads that suffix as a *pre-release* (lower than `2026.7.1`), so:
+- A `select(test("-") | not)` filter hides the version most users actually install.
+- The old gate used `npm view openclaw version` (dist-tag → `2026.7.1-2`) while the bump script filtered dashes out (→ `2026.7.1`). `npm run bump:openclaw` could therefore never satisfy the gate — an unfixable release failure.
+
+The module's rule: a **release** matches `/^\d+\.\d+\.\d+(-\d+)?$/`, and `compareVersions` sorts `X.Y.Z-N` **above** `X.Y.Z` (deliberately inverting semver). Genuine pre-releases (`-alpha.1`, `-beta.7`) are still excluded.
+
+- `latest` — the `latest` dist-tag when it's a release version, else the highest published release.
+- `matrix [n]` — JSON array of the newest n *patch lines*, collapsed to the newest respin of each (so the matrix doesn't burn three legs on `2026.7.1`, `-1`, `-2`).
+- `check` — the publish gate. Fails only when a `package.json` field is **behind** latest; being ahead is fine, so an openclaw release landing mid-publish can't break a release.
+
 ## CI Workflows
 
 ### `ci.yml` — fast PR gate
-- Runs `npx tsc --noEmit` + `npx vitest run` on Node 22.
+- Pins npm to the release major, then runs `npm ci` + `npx tsc --noEmit` + `npx vitest run` + `npm run build` on Node 22.
 - Triggers on push/PR to `main`.
+- Uses `npm ci`, **not** `npm install` — install must fail on a stale/incomplete lockfile instead of silently rewriting it. With `npm install` here, CI stayed green while the release job died on the same commit.
+
+### The npm major / lockfile trap
+
+**Every place that installs or writes `package-lock.json` must use the same npm major.** It is pinned to `12` in three spots — `NPM_VERSION` in `ci.yml` and `publish.yml`, and `RELEASE_NPM` in `scripts/bump-openclaw.mjs`. Keep them in sync.
+
+Why: npm majors generate materially different lock trees, and `npm ci` hard-fails on a lock written by a different major. Concretely, npm 11 hoisted `@types/retry@0.12.5` into `openclaw/node_modules/` and **omitted** the `@types/retry@0.12.0` that `p-retry` pins exactly. npm 11 accepted its own lock; npm 12 correctly rejected it with `Missing: @types/retry@0.12.0 from lock file`. Because `publish.yml` upgraded to a floating `npm@latest`, releases started failing the day npm 12 shipped — with **no repo change at all**, and nothing reproducible locally on npm 11.
+
+To move majors: bump `NPM_VERSION` in both workflows and `RELEASE_NPM` in the bump script, regenerate the lock with that npm (`npx -y npm@<major> install`), and commit all of it together.
 
 ### `openclaw_version_tests.yml` — OpenClaw runtime compatibility matrix
 Validates the plugin actually installs and loads inside a real OpenClaw runtime.

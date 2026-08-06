@@ -28,52 +28,41 @@ jobs:
           cache: npm
 
       # npm trusted publishing (OIDC) needs npm >= 11.5. Node 22 ships npm 10.x,
-      # so we upgrade. Running `npm install -g npm@latest` with the bundled npm
+      # so we upgrade. Running `npm install -g npm@X` with the bundled npm
       # races against itself (it overwrites its own files mid-execution, then
-      # fails to `require` removed internal modules). Use npx to fetch
-      # npm@latest into a separate location and let *that* npm do the global
+      # fails to `require` removed internal modules). Use npx to fetch the
+      # target npm into a separate location and let *that* npm do the global
       # install — running process and target path are distinct, no race.
+      #
+      # Pinned to a major (NOT npm@latest): a floating major silently changes
+      # how `npm ci` validates package-lock.json mid-flight. npm 12 rejected an
+      # npm 11-generated lock (a nested exact-version dep npm 11 had omitted),
+      # which broke releases with no repo change at all. ci.yml pins the SAME
+      # major so lock drift fails a PR instead of a release. To move majors:
+      # bump NPM_VERSION in both workflows, regenerate the lock with that npm
+      # (`npx -y npm@<major> install`), and commit the result together.
       - name: Upgrade npm for trusted publishing
+        env:
+          NPM_VERSION: '12'
         run: |
-          npx -y npm@latest install -g npm@latest
+          npx -y "npm@${NPM_VERSION}" install -g "npm@${NPM_VERSION}"
           npm --version
 
       - name: Install dependencies
         run: npm ci
 
-      # Gate publishing on the pinned openclaw version matching npm's latest.
-      # OpenClaw ships a new stable nearly every day, so we don't enforce this
-      # on every PR/commit (would be busy-work) — but we DO refuse to publish
-      # a release that lags behind. Run `npm run bump:openclaw` and re-cut the
-      # release if this fails.
+      # Gate publishing on the pinned openclaw version not lagging behind npm's
+      # latest. OpenClaw ships a new release nearly every day, so we don't
+      # enforce this on every PR/commit (would be busy-work) — but we DO refuse
+      # to publish a release that lags behind. Run `npm run bump:openclaw` and
+      # re-cut the release if this fails.
+      #
+      # The comparison lives in scripts/openclaw-version.mjs so this gate, the
+      # bump script and the version-test matrix all agree on what "latest" is —
+      # notably that openclaw's `X.Y.Z-N` re-releases are releases, not
+      # pre-releases. Being *ahead* of latest is fine and does not fail.
       - name: Verify openclaw is on the latest version
-        run: |
-          LATEST=$(npm view openclaw version)
-          echo "Latest openclaw on npm: $LATEST"
-
-          CURRENT_DEV=$(node -p "require('./package.json').devDependencies.openclaw")
-          CURRENT_BUILT=$(node -p "require('./package.json').openclaw.compat.builtWithOpenClawVersion")
-          CURRENT_SDK=$(node -p "require('./package.json').openclaw.compat.pluginSdkVersion")
-          CURRENT_DEV_VERSION=$(echo "$CURRENT_DEV" | sed -E 's/^[^0-9]*//')
-
-          FAIL=0
-          if [ "$CURRENT_DEV_VERSION" != "$LATEST" ]; then
-            echo "::error::devDependencies.openclaw is \"$CURRENT_DEV\" (resolves to $CURRENT_DEV_VERSION), latest on npm is $LATEST. Bump it before releasing."
-            FAIL=1
-          fi
-          if [ "$CURRENT_BUILT" != "$LATEST" ]; then
-            echo "::error::openclaw.compat.builtWithOpenClawVersion is \"$CURRENT_BUILT\", latest on npm is $LATEST. Bump it before releasing."
-            FAIL=1
-          fi
-          if [ "$CURRENT_SDK" != "$LATEST" ]; then
-            echo "::error::openclaw.compat.pluginSdkVersion is \"$CURRENT_SDK\", latest on npm is $LATEST. Bump it before releasing."
-            FAIL=1
-          fi
-          if [ "$FAIL" = "1" ]; then
-            echo "Run: npm run bump:openclaw && commit + re-cut the release."
-            exit 1
-          fi
-          echo "All openclaw version fields are up to date ($LATEST)."
+        run: node scripts/openclaw-version.mjs check
 
       - name: Extract release version
         run: |
