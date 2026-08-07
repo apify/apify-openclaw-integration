@@ -14,7 +14,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
+
+      # Match the npm major the release job publishes with. `npm ci` validates
+      # package-lock.json against package.json, and that validation differs
+      # between npm majors — running a different npm here means CI can be green
+      # while the release fails on the same commit. Keep in sync with the
+      # NPM_VERSION in publish.yml.
+      - name: Pin npm to the release major
+        env:
+          NPM_VERSION: '12'
+        run: |
+          npx -y "npm@${NPM_VERSION}" install -g "npm@${NPM_VERSION}"
+          npm --version
+
+      # `npm ci` (not `npm install`): install must FAIL on a stale or incomplete
+      # lockfile rather than quietly rewriting it, so lock problems surface on
+      # the PR instead of at release time.
+      - run: npm ci
       - run: npx tsc --noEmit
       - run: npx vitest run
       - run: npm run build

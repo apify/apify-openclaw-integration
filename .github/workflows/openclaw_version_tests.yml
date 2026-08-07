@@ -18,6 +18,8 @@ jobs:
     outputs:
       versions: ${{ steps.filter.outputs.versions }}
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -28,20 +30,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Drop pre-releases (anything with '-'), sort by semver, take the latest 3.
-          versions=$(
-            npm view openclaw versions --json \
-              | jq -r '.[] | select(test("-") | not)' \
-              | sort -V \
-              | tail -n 3
-          )
+          # Delegated to scripts/openclaw-version.mjs so this matrix, the publish
+          # gate and the bump script share one definition of an OpenClaw release.
+          # It drops true pre-releases (-alpha.N / -beta.N) but KEEPS the numeric
+          # re-release suffix openclaw uses for respins (e.g. 2026.7.1-2), which
+          # `latest` can point at — a plain `select(test("-") | not)` filter used
+          # to hide exactly the version most users install.
+          json=$(node scripts/openclaw-version.mjs matrix 3 | tail -n 1)
 
-          if [ -z "$versions" ]; then
-            echo "No stable OpenClaw versions found on npm." >&2
-            exit 1
-          fi
-
-          json=$(echo "$versions" | jq -R . | jq -sc .)
           echo "versions=$json" >> "$GITHUB_OUTPUT"
           echo "Selected versions: $json"
 

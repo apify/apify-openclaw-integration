@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-// Bump openclaw to the latest stable version on npm, gated on the same smoke checks CI runs.
+// Bump openclaw to the latest release on npm, gated on the same smoke checks CI runs.
 //
 // Flow:
-//   1. Resolve latest stable openclaw version (skip pre-releases, semver-sort).
+//   1. Resolve the latest openclaw release (scripts/openclaw-version.mjs — same
+//      source of truth the publish gate uses, so a successful bump always
+//      satisfies the gate).
 //   2. If devDependencies.openclaw is already at latest, exit 0.
 //   3. Pack the plugin (npm pack) and install it against openclaw@latest in a temp workdir.
 //   4. Run `openclaw plugins list` + `plugins inspect` smoke checks (mirrors openclaw_version_tests.yml).
@@ -18,11 +20,33 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+import {
+  REPO_ROOT,
+  compareVersions,
+  currentDevVersion,
+  isReleaseVersion,
+  latestOpenclawVersion,
+  pinnedVersions,
+  stripRange,
+} from "./openclaw-version.mjs";
+
 const PLUGIN_ID = "apify-openclaw-plugin";
 const TOOL_NAME = "apify";
+
+// npm majors generate materially different package-lock.json trees, and CI runs
+// `npm ci`, which HARD-FAILS on a lock written by a different major (npm 11
+// omitted a nested exact-version dep that npm 12 requires — it broke a release
+// with no repo change at all). Anything here that rewrites the repo lockfile
+// must therefore use the same npm major the release publishes with, whatever
+// the developer happens to have installed locally.
+// Keep in sync with NPM_VERSION in .github/workflows/{ci,publish}.yml.
+const RELEASE_NPM = "npm@12";
+
+/** Run an npm command under the pinned release npm (for lockfile-writing installs). */
+function runPinnedNpm(args, opts = {}) {
+  return run("npx", ["-y", RELEASE_NPM, ...args], opts);
+}
 
 function run(cmd, args, opts = {}) {
   const result = spawnSync(cmd, args, {
@@ -53,36 +77,9 @@ function capture(cmd, args, opts = {}) {
   return result.stdout;
 }
 
-function compareSemver(a, b) {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const da = pa[i] ?? 0;
-    const db = pb[i] ?? 0;
-    if (da !== db) return da - db;
-  }
-  return 0;
-}
-
-function latestStableOpenclaw() {
-  const json = capture("npm", ["view", "openclaw", "versions", "--json"]);
-  const all = JSON.parse(json);
-  const stable = all.filter((v) => !v.includes("-"));
-  if (stable.length === 0) throw new Error("No stable openclaw versions on npm.");
-  stable.sort(compareSemver);
-  return stable[stable.length - 1];
-}
-
-function currentDevVersion() {
-  const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8"));
-  const raw = pkg.devDependencies?.openclaw;
-  if (!raw) throw new Error("devDependencies.openclaw is missing from package.json");
-  return raw.replace(/^[\^~>=<\s]+/, "").trim();
-}
-
 function smokeTest(latest) {
   console.log(`\n=== Packing plugin ===`);
-  run("npm", ["install"], { cwd: REPO_ROOT });
+  runPinnedNpm(["install"], { cwd: REPO_ROOT });
   const packOut = capture("npm", ["pack"], { cwd: REPO_ROOT });
   const tarballName = packOut.trim().split("\n").pop();
   const tarballPath = path.join(REPO_ROOT, tarballName);
@@ -191,9 +188,7 @@ function containsStringValue(node, target) {
   return false;
 }
 
-function applyBump(latest) {
-  console.log(`\n=== Applying bump to package.json ===`);
-  run("npm", ["install", "--save-dev", `openclaw@${latest}`], { cwd: REPO_ROOT });
+function setMetadata(latest) {
   run(
     "npm",
     [
@@ -207,14 +202,42 @@ function applyBump(latest) {
   );
 }
 
+function applyBump(latest) {
+  console.log(`\n=== Applying bump to package.json ===`);
+  runPinnedNpm(["install", "--save-dev", `openclaw@${latest}`], { cwd: REPO_ROOT });
+  setMetadata(latest);
+}
+
+/** Fields the publish gate checks that are behind `latest` (or malformed). */
+function staleFields(latest) {
+  return pinnedVersions()
+    .filter(({ raw }) => {
+      if (raw === undefined) return true;
+      const version = stripRange(raw);
+      return !isReleaseVersion(version) || compareVersions(version, latest) < 0;
+    })
+    .map(({ label }) => label);
+}
+
 function main() {
-  const latest = latestStableOpenclaw();
+  const latest = latestOpenclawVersion();
   const current = currentDevVersion();
   console.log(`Current devDependencies.openclaw: ${current}`);
-  console.log(`Latest stable on npm:             ${latest}`);
+  console.log(`Latest release on npm:            ${latest}`);
 
-  if (compareSemver(current, latest) >= 0) {
-    console.log(`Already on openclaw@${current}. Nothing to do.`);
+  if (compareVersions(current, latest) >= 0) {
+    console.log(`Already on openclaw@${current}.`);
+    // The installed version is already current, but the openclaw.* metadata
+    // fields can still lag (e.g. hand-edited). The publish gate checks all of
+    // them, so resync — no smoke test needed, the runtime version isn't changing.
+    const stale = staleFields(latest);
+    if (stale.length === 0) {
+      console.log("All openclaw version fields are up to date. Nothing to do.");
+      return;
+    }
+    console.log(`\n=== Resyncing stale metadata fields: ${stale.join(", ")} ===`);
+    setMetadata(current);
+    console.log(`\nMetadata resynced to ${current} — review and commit.`);
     return;
   }
 
