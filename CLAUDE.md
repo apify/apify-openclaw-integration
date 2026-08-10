@@ -21,10 +21,15 @@ src/
   util.ts                     # Inlined utilities: ToolInputError, normalizeSecretInput, wrapExternalContent
   tools/
     apify-scraper-tool.ts     # Universal scraper — discover + start + collect
+  scripts/
+    publish-clawhub.mjs       # Publish to ClawHub under the ClawHub id (`apify`) — renames manifest id, publishes, restores
+    bump-openclaw.mjs         # Bump openclaw to latest (derives plugin id from the manifest)
+    openclaw-version.mjs      # Single source of truth for "latest openclaw version"
+    migrate-id.mjs            # Legacy user-facing id migration helper
 test/
   helpers.ts                  # makeMockFetch, standardRunResponses, TEST_CONFIG
   apify-scraper.test.ts       # Tool tests
-openclaw.plugin.json          # Plugin manifest (configSchema + uiHints) — REQUIRED
+openclaw.plugin.json          # Plugin manifest — REQUIRED. SINGLE SOURCE OF TRUTH for the plugin `id`.
 package.json                  # npm package config
 ```
 
@@ -61,6 +66,38 @@ The tool description includes instructions for the agent:
 **Format: `username~actor-name`** (tilde separator, not slash).
 
 The `~` format avoids URL path ambiguity. The `discover` action builds slugs as `${username}~${name}`.
+
+## Plugin ID — single source of truth (+ the ClawHub id split)
+
+There are **two** ids in play and it matters which is which:
+
+- **Canonical id = `apify-openclaw-plugin`.** This is what ships to npm and what the OpenClaw installer keys on. It lives as a literal in **exactly one place**: `openclaw.plugin.json` `"id"`.
+- **ClawHub id = `apify`.** ClawHub has this plugin registered under the shorter id `apify` (that's what existing ClawHub users installed). We publish to ClawHub under `apify` **only**.
+
+### Everything derives from the manifest — do NOT hardcode the id
+
+`openclaw.plugin.json` is the sole literal. The OpenClaw loader reads the id from that JSON *before any plugin code runs* (`node_modules/openclaw/dist/loader-*.js`), so it must be a literal there. Everything else derives from it:
+
+| Consumer | How it gets the id |
+|----------|--------------------|
+| `src/index.ts` default export | **omits `id`** — the loader only checks the export id *if present* (and fails on mismatch), so we leave it out. |
+| `src/cli.ts` (config entry key, `plugins.allow`, manual-config printout) | uses **`api.id`** at runtime (OpenClawPluginApi exposes `api.id`). `printManualConfig(pluginId, …)` takes it as a param. |
+| `package.json` `openclaw.id` | **removed** — not read by the runtime loader, was redundant. |
+| `scripts/bump-openclaw.mjs` | reads `openclaw.plugin.json` `id` at runtime. |
+| `.github/workflows/openclaw_version_tests.yml` | `PLUGIN_ID=$(jq -r .id openclaw.plugin.json)`. |
+
+So to change the canonical id you edit **one** literal (the manifest). To change the ClawHub id you edit **one** constant (`CLAWHUB_ID` in `scripts/publish-clawhub.mjs`).
+
+### Publishing to ClawHub — `scripts/publish-clawhub.mjs`
+
+The reusable `openclaw/clawhub` publish workflow packs the repo verbatim with **no id/name override**, so it cannot publish a different id than the manifest carries. Instead we run the ClawHub CLI ourselves:
+
+```
+npm run publish:clawhub            # = npm run build && node scripts/publish-clawhub.mjs
+npm run publish:clawhub -- --dry-run
+```
+
+The script: (1) rewrites the manifest `id` → `apify`, (2) runs `clawhub package publish . --family code-plugin --owner apify`, (3) **always restores** the original `apify-openclaw-plugin` manifest (even on failure/signal), so the working tree is never left mutated. `dist` is id-agnostic (code uses `api.id`), so no id-specific rebuild is needed — but the npm script rebuilds anyway to keep the packed `dist` fresh. Auth: an existing `clawhub login`, or `CLAWHUB_TOKEN` in CI.
 
 ## Setup Wizard — Direct Config Write
 
@@ -112,6 +149,13 @@ The module's rule: a **release** matches `/^\d+\.\d+\.\d+(-\d+)?$/`, and `compar
 - Pins npm to the release major, then runs `npm ci` + `npx tsc --noEmit` + `npx vitest run` + `npm run build` on Node 22.
 - Triggers on push/PR to `main`.
 - Uses `npm ci`, **not** `npm install` — install must fail on a stale/incomplete lockfile instead of silently rewriting it. With `npm install` here, CI stayed green while the release job died on the same commit.
+
+### `publish.yml` — release to npm + ClawHub
+Triggered by a published GitHub Release. Two jobs:
+
+- **`release`** — the npm publish path, id stays canonical (`apify-openclaw-plugin`). Upgrades npm to the pinned major, `npm ci`, runs the openclaw-version gate (`node scripts/openclaw-version.mjs check`), bumps `package.json` to the release tag (idempotent — skipped if already at that version), type-checks, tests, builds, commits the version bump back to the release branch, then `npm publish --provenance --access public` (skipped if that version is already on npm).
+- **`publish-clawhub`** (`needs: release`) — the ClawHub publish path, id flipped to `apify`. Checks out `target_commitish` (main, *after* the version-bump commit), `npm ci`, installs the `clawhub` CLI, then runs `npm run publish:clawhub` which invokes `scripts/publish-clawhub.mjs`. That script renames the manifest id → `apify`, publishes, and restores the canonical id. This is done **in-house rather than via the reusable `openclaw/clawhub` package-publish workflow** because that workflow packs the repo verbatim with no id override — see the "Publishing to ClawHub" section.
+  - Auth uses `CLAWHUB_TOKEN` (`secrets.APIFY_CLAWHUB_TOKEN`) + `--manual-override-reason`. **This auth path (token vs OIDC trusted-publisher) needs a real CI run to confirm** — if ClawHub expects OIDC for this package, adjust the step accordingly.
 
 ### The npm major / lockfile trap
 
@@ -220,7 +264,7 @@ Tool names that collide with core tool names are silently dropped. Plugin tools 
     },
   },
   tools: {
-    alsoAllow: ["group:plugins"],   // or "apify" or "apify"
+    alsoAllow: ["group:plugins"],   // or the "apify" tool name
   },
 }
 ```
@@ -252,4 +296,4 @@ All scraped data is **untrusted external content**. The `wrapExternalContent(con
 5. **`workspace:*` deps break outside the monorepo.** We use `"openclaw": "^2026.2.18"` in devDependencies.
 6. **Plugin tools are gated by allowlists.** Users must add tool names or `group:plugins` to `tools.alsoAllow`.
 7. **No `Type.Union` in schemas.** OpenClaw rejects `anyOf`/`oneOf`/`allOf`. Use `stringEnum()` and `Type.Optional()`.
-8. **Don't rename the plugin id.** It was renamed `apify` → `apify-openclaw-plugin` between v0.1.0 and v0.2.0 and broke every existing user's update flow (OpenClaw's installer rejects id mismatches before any migration logic runs). `scripts/migrate-id.mjs` exists as the user-facing workaround. If a future rename is unavoidable, ship another migration script and document it in the README.
+8. **Don't rename the canonical plugin id.** It was renamed `apify` → `apify-openclaw-plugin` between v0.1.0 and v0.2.0 and broke every existing user's update flow (OpenClaw's installer rejects id mismatches before any migration logic runs). `scripts/migrate-id.mjs` exists as the user-facing workaround. If a future rename is unavoidable, ship another migration script and document it in the README. **Note the deliberate exception:** ClawHub knows this plugin by the shorter id `apify`, so the release pipeline flips the manifest id to `apify` *only* for the ClawHub upload via `scripts/publish-clawhub.mjs` (npm still gets the canonical `apify-openclaw-plugin`). See the "Plugin ID — single source of truth" section — that is intentional and must not be "fixed" by aligning the two.

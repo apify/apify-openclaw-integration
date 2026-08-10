@@ -98,12 +98,12 @@ async function applyConfigChanges(
       // Merge plugin entry
       if (!cfg.plugins) cfg.plugins = {};
       if (!cfg.plugins.entries) cfg.plugins.entries = {};
-      const existing = cfg.plugins.entries["apify-openclaw-plugin"] ?? {};
+      const existing = cfg.plugins.entries[api.id] ?? {};
       const existingPluginConfig =
         typeof existing.config === "object" && existing.config !== null
           ? (existing.config as Record<string, unknown>)
           : {};
-      cfg.plugins.entries["apify-openclaw-plugin"] = {
+      cfg.plugins.entries[api.id] = {
         ...existing,
         enabled: true,
         config: {
@@ -116,8 +116,8 @@ async function applyConfigChanges(
       // Pin trust: add plugin id to plugins.allow so OpenClaw doesn't warn about
       // discovered non-bundled plugins auto-loading.
       if (!Array.isArray(cfg.plugins.allow)) cfg.plugins.allow = [];
-      if (!cfg.plugins.allow.includes("apify-openclaw-plugin")) {
-        cfg.plugins.allow.push("apify-openclaw-plugin");
+      if (!cfg.plugins.allow.includes(api.id)) {
+        cfg.plugins.allow.push(api.id);
       }
 
       // Merge tools.alsoAllow (add selected tools, avoid duplicates)
@@ -133,7 +133,12 @@ async function applyConfigChanges(
   });
 }
 
-function printManualConfig(apiKey: string, selectedTools: string[], allSelected: boolean): void {
+function printManualConfig(
+  pluginId: string,
+  apiKey: string,
+  selectedTools: string[],
+  allSelected: boolean,
+): void {
   const toolAllow = allSelected
     ? "      - group:plugins   # all Apify tools"
     : selectedTools.map((t) => `      - ${t}`).join("\n");
@@ -143,9 +148,9 @@ function printManualConfig(apiKey: string, selectedTools: string[], allSelected:
   console.log("  Add this to your OpenClaw config:\n");
   console.log("  plugins:");
   console.log("    allow:");
-  console.log("      - apify-openclaw-plugin");
+  console.log(`      - ${pluginId}`);
   console.log("    entries:");
-  console.log("      apify-openclaw-plugin:");
+  console.log(`      ${pluginId}:`);
   console.log("        enabled: true");
   console.log("        config:");
   console.log(`          apiKey: "${apiKey}"`);
@@ -248,10 +253,10 @@ async function runSetupCommand(api: OpenClawPluginApi): Promise<void> {
         console.log("failed.");
         console.log(`\n  ✗ ${err instanceof Error ? err.message : String(err)}`);
         console.log("\n  Falling back to manual config:\n");
-        printManualConfig(apiKey, selectedTools, allSelected);
+        printManualConfig(api.id, apiKey, selectedTools, allSelected);
       }
     } else {
-      printManualConfig(apiKey, selectedTools, allSelected);
+      printManualConfig(api.id, apiKey, selectedTools, allSelected);
     }
   } finally {
     rl.close();

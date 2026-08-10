@@ -117,15 +117,51 @@ jobs:
             npm publish --provenance --access public
           fi
 
+  # ClawHub publish is done in-house (NOT via the reusable
+  # openclaw/clawhub package-publish workflow) because ClawHub knows this plugin
+  # by the id `apify`, while the repo/npm canonical id is `apify-openclaw-plugin`.
+  # The reusable workflow packs the repo verbatim with no id override, so we run
+  # the ClawHub CLI ourselves through scripts/publish-clawhub.mjs, which flips the
+  # manifest id -> `apify` just for the upload and restores it afterwards.
   publish-clawhub:
     needs: release
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
-    uses: openclaw/clawhub/.github/workflows/package-publish.yml@v0.12.0
-    with:
-      dry_run: false
-      ref: ${{ github.event.release.target_commitish }}
-      owner: apify
-    secrets:
-      clawhub_token: ${{ secrets.APIFY_CLAWHUB_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # target_commitish is main AFTER the release job's version-bump commit.
+          ref: ${{ github.event.release.target_commitish }}
+          fetch-depth: 0
+
+      - name: Set up Node.js & cache npm
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: npm
+
+      # Match the npm major the lockfile was written with (see ci/publish notes).
+      - name: Upgrade npm
+        env:
+          NPM_VERSION: '12'
+        run: |
+          npx -y "npm@${NPM_VERSION}" install -g "npm@${NPM_VERSION}"
+          npm --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install ClawHub CLI
+        run: npm install -g clawhub
+
+      # publish:clawhub = `npm run build && node scripts/publish-clawhub.mjs`.
+      # The script renames the manifest id to `apify`, publishes, then restores it.
+      # NOTE: auth path (CLAWHUB_TOKEN + manual override) needs a real CI run to
+      # confirm — if the package has a trusted-publisher (OIDC) config, adjust here.
+      - name: Publish to ClawHub (id renamed to `apify`)
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.APIFY_CLAWHUB_TOKEN }}
+        run: npm run publish:clawhub -- --json --manual-override-reason "release publish: rename canonical id to ClawHub id 'apify'"

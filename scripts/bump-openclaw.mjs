@@ -31,7 +31,12 @@ import {
   stripRange,
 } from "./openclaw-version.mjs";
 
-const PLUGIN_ID = "apify-openclaw-plugin";
+// Single source of truth for the plugin id: openclaw.plugin.json. The manifest
+// is the only file that carries a literal id (OpenClaw parses it before any
+// plugin code runs); everything else — including this script — derives from it.
+const PLUGIN_ID = JSON.parse(
+  fs.readFileSync(path.join(REPO_ROOT, "openclaw.plugin.json"), "utf8"),
+).id;
 const TOOL_NAME = "apify";
 
 // npm majors generate materially different package-lock.json trees, and CI runs

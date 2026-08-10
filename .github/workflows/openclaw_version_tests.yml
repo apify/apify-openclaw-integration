@@ -61,6 +61,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Plugin id is centralized in openclaw.plugin.json (single source of
+          # truth). Derive it from the checked-out manifest instead of hardcoding.
+          PLUGIN_ID=$(jq -r .id "$GITHUB_WORKSPACE/openclaw.plugin.json")
+          echo "Plugin id (from manifest): $PLUGIN_ID"
+
           # On PRs, pack the PR's source and install that tarball. On schedule /
           # manual dispatch, install the currently-published @latest from npm.
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
@@ -98,8 +103,8 @@ jobs:
           npx --no-install openclaw plugins list || true
           echo "::endgroup::"
 
-          echo "::group::openclaw plugins inspect apify-openclaw-plugin --runtime --json"
-          inspect_json=$(npx --no-install openclaw plugins inspect apify-openclaw-plugin --runtime --json)
+          echo "::group::openclaw plugins inspect $PLUGIN_ID --runtime --json"
+          inspect_json=$(npx --no-install openclaw plugins inspect "$PLUGIN_ID" --runtime --json)
           echo "$inspect_json" | jq .
           if ! echo "$inspect_json" | jq -e '.. | strings | select(. == "apify")' >/dev/null; then
             echo "FAIL: 'apify' tool not found in plugin runtime inspect output" >&2
