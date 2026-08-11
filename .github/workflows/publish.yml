@@ -157,11 +157,20 @@ jobs:
       - name: Install ClawHub CLI
         run: npm install -g clawhub
 
-      # publish:clawhub = `npm run build && node scripts/publish-clawhub.mjs`.
-      # The script renames the manifest id to `apify`, publishes, then restores it.
-      # NOTE: auth path (CLAWHUB_TOKEN + manual override) needs a real CI run to
-      # confirm — if the package has a trusted-publisher (OIDC) config, adjust here.
-      - name: Publish to ClawHub (id renamed to `apify`)
+      # The ClawHub CLI does NOT read CLAWHUB_TOKEN directly — it authenticates
+      # from its own on-disk config. So we must log in with the secret first;
+      # `clawhub login` persists the credentials on the runner, and the publish
+      # step below then runs authenticated. (Alternatively the reusable workflow
+      # sets CLAWHUB_CONFIG_PATH to a pre-seeded config file — either works.)
+      - name: Authenticate ClawHub CLI
         env:
           CLAWHUB_TOKEN: ${{ secrets.APIFY_CLAWHUB_TOKEN }}
-        run: npm run publish:clawhub -- --json --manual-override-reason "release publish: rename canonical id to ClawHub id 'apify'"
+        run: clawhub login --token "$CLAWHUB_TOKEN"
+
+      # publish:clawhub = `npm run build && node scripts/publish-clawhub.mjs`.
+      # The script renames the manifest id to `apify`, publishes, then restores it.
+      # Auth comes from the `clawhub login` step above (config on disk), not from a
+      # bare env var; --manual-override-reason records why the id is renamed.
+      - name: Publish to ClawHub (id renamed to `apify`)
+        run: >-
+          npm run publish:clawhub -- --json --manual-override-reason "release publish: rename canonical id to ClawHub id 'apify'"

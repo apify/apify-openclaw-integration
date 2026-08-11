@@ -25,7 +25,11 @@
 //   node scripts/publish-clawhub.mjs --dry-run      # preview, no upload
 //   (any extra args are forwarded to `clawhub package publish`)
 //
-// Auth: relies on an existing `clawhub login`, or a CLAWHUB_TOKEN env var in CI.
+// Auth: the ClawHub CLI does NOT read CLAWHUB_TOKEN directly — it authenticates
+// from its own on-disk config. So CI must first run
+// `clawhub login --token "$CLAWHUB_TOKEN"` (or point CLAWHUB_CONFIG_PATH at a
+// pre-seeded config file) before invoking this script; locally it relies on an
+// existing interactive `clawhub login`.
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";

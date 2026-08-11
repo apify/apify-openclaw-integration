@@ -97,7 +97,7 @@ npm run publish:clawhub            # = npm run build && node scripts/publish-cla
 npm run publish:clawhub -- --dry-run
 ```
 
-The script: (1) rewrites the manifest `id` → `apify`, (2) runs `clawhub package publish . --family code-plugin --owner apify`, (3) **always restores** the original `apify-openclaw-plugin` manifest (even on failure/signal), so the working tree is never left mutated. `dist` is id-agnostic (code uses `api.id`), so no id-specific rebuild is needed — but the npm script rebuilds anyway to keep the packed `dist` fresh. Auth: an existing `clawhub login`, or `CLAWHUB_TOKEN` in CI.
+The script: (1) rewrites the manifest `id` → `apify`, (2) runs `clawhub package publish . --family code-plugin --owner apify`, (3) **always restores** the original `apify-openclaw-plugin` manifest (even on failure/signal), so the working tree is never left mutated. `dist` is id-agnostic (code uses `api.id`), so no id-specific rebuild is needed — but the npm script rebuilds anyway to keep the packed `dist` fresh. Auth: the ClawHub CLI does **not** consume `CLAWHUB_TOKEN` directly — it reads credentials from its own config. CI therefore runs `clawhub login --token "$CLAWHUB_TOKEN"` first (or sets `CLAWHUB_CONFIG_PATH` to a pre-seeded config file); locally it relies on an existing interactive `clawhub login`. Setting `CLAWHUB_TOKEN` alone does not authenticate the CLI and would 401.
 
 ## Setup Wizard — Direct Config Write
 
@@ -155,7 +155,7 @@ Triggered by a published GitHub Release. Two jobs:
 
 - **`release`** — the npm publish path, id stays canonical (`apify-openclaw-plugin`). Upgrades npm to the pinned major, `npm ci`, runs the openclaw-version gate (`node scripts/openclaw-version.mjs check`), bumps `package.json` to the release tag (idempotent — skipped if already at that version), type-checks, tests, builds, commits the version bump back to the release branch, then `npm publish --provenance --access public` (skipped if that version is already on npm).
 - **`publish-clawhub`** (`needs: release`) — the ClawHub publish path, id flipped to `apify`. Checks out `target_commitish` (main, *after* the version-bump commit), `npm ci`, installs the `clawhub` CLI, then runs `npm run publish:clawhub` which invokes `scripts/publish-clawhub.mjs`. That script renames the manifest id → `apify`, publishes, and restores the canonical id. This is done **in-house rather than via the reusable `openclaw/clawhub` package-publish workflow** because that workflow packs the repo verbatim with no id override — see the "Publishing to ClawHub" section.
-  - Auth uses `CLAWHUB_TOKEN` (`secrets.APIFY_CLAWHUB_TOKEN`) + `--manual-override-reason`. **This auth path (token vs OIDC trusted-publisher) needs a real CI run to confirm** — if ClawHub expects OIDC for this package, adjust the step accordingly.
+  - Auth: the ClawHub CLI does **not** read `CLAWHUB_TOKEN` directly, so a dedicated **`Authenticate ClawHub CLI`** step runs `clawhub login --token "$CLAWHUB_TOKEN"` (`secrets.APIFY_CLAWHUB_TOKEN`) **before** the publish step; the login persists on the runner so the publish step is authenticated (alternatively `CLAWHUB_CONFIG_PATH` can point at a pre-seeded config file, as the reusable workflow does). Publishing uses `--manual-override-reason` to record the id rename.
 
 ### The npm major / lockfile trap
 
