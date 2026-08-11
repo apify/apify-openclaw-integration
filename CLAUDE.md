@@ -21,6 +21,9 @@ src/
   util.ts                     # Inlined utilities: ToolInputError, normalizeSecretInput, wrapExternalContent
   tools/
     apify-scraper-tool.ts     # Universal scraper — discover + start + collect
+skills/
+  apify-scraper/
+    SKILL.md                  # Actor routing-table skill (tilde Actor IDs) — shipped via manifest `skills`
 test/
   helpers.ts                  # makeMockFetch, standardRunResponses, TEST_CONFIG
   apify-scraper.test.ts       # Tool tests
@@ -54,7 +57,7 @@ The tool description includes instructions for the agent:
 - **`apify-client` SDK:** Uses the official `apify-client` npm package (not raw HTTP). Client created via `createApifyClient(apiKey, baseUrl)`.
 - **Inlined utilities (`util.ts`):** `ToolInputError`, `normalizeSecretInput`, and `wrapExternalContent` are NOT exported from `openclaw/plugin-sdk`. We carry local copies.
 - **No build step:** OpenClaw loads plugins via `jiti` (TypeScript JIT). We ship `.ts` source directly.
-- **No skills:** Skills were removed — the tool description and `discover` action provide all needed guidance.
+- **Skills:** Ships a single repo-specific OpenClaw skill, `apify-scraper` (`skills/apify-scraper/SKILL.md`), whose core value is an **Actor routing table** — a curated lookup mapping a scraping need to the exact Apify Actor ID (tilde `username~actor-name` format) so the agent picks the right Actor deterministically instead of always calling the `discover` search. The skill body describes this plugin's single `apify` tool (`discover`/`start`/`collect` actions). Sourced from the `apify-plugins-internal` skill generator/catalog (`src/generators/skill-from-catalog.ts` + `content/skills/apify-ultimate-scraper/references/actor-index.md`). It is shipped via the manifest top-level `skills` field (`openclaw.plugin.json`) and the `skills/` entry in `package.json` `files` — OpenClaw discovers skills from the manifest path, so no `register()` call is needed.
 
 ## Apify Actor IDs
 

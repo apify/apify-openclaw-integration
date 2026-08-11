@@ -50,6 +50,8 @@ The plugin registers a single tool — `apify` — with three actions:
 
 The tool uses a **two-phase async pattern**: `start` fires off a run and returns immediately. `collect` fetches results when the run completes. The agent does other work in between.
 
+The plugin also ships an `apify-scraper` skill (`skills/apify-scraper/SKILL.md`) carrying an **Actor routing table** — a curated lookup mapping a scraping need to the exact Apify Actor ID (tilde `username~actor-name` format) — so the agent can pick the right Actor directly instead of always searching the Store. OpenClaw loads it automatically via the manifest `skills` field.
+
 ## Get an API key
 
 1. Create an Apify account at [https://console.apify.com/](https://console.apify.com/)

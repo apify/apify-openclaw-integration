@@ -5,6 +5,7 @@
   "contracts": {
     "tools": ["apify"]
   },
+  "skills": ["./skills"],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

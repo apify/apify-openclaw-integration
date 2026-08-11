@@ -43,6 +43,7 @@
     "dist/",
     "src/",
     "scripts/",
+    "skills/",
     "openclaw.plugin.json",
     "README.md",
     "LICENSE"
