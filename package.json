@@ -21,7 +21,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "prepack": "npm run build",
-    "bump:openclaw": "node scripts/bump-openclaw.mjs"
+    "bump:openclaw": "node scripts/bump-openclaw.mjs",
+    "publish:clawhub": "npm run build && node scripts/publish-clawhub.mjs"
   },
   "keywords": [
     "openclaw",
@@ -65,7 +66,6 @@
     "vitest": "^3.0.0"
   },
   "openclaw": {
-    "id": "apify-openclaw-plugin",
     "build": {
       "openclawVersion": "2026.7.1-2"
     },
