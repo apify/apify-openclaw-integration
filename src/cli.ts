@@ -1,7 +1,27 @@
 import readline from "readline";
-import type { OpenClawConfig, OpenClawPluginApi } from "openclaw/plugin-sdk/core";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { normalizeSecretInput } from "./util.js";
 import { createApifyClient, DEFAULT_APIFY_BASE_URL } from "./apify-client.js";
+
+// ---------------------------------------------------------------------------
+// Uninstall / config cleanup — research note (issue #39, PR #40 review)
+// ---------------------------------------------------------------------------
+// We intentionally do NOT register a custom `apify uninstall` command. OpenClaw
+// exposes NO plugin-uninstall lifecycle hook: the typed hook catalog
+// (`PLUGIN_HOOK_NAMES`) has `before_install`, `deactivate`/`gateway_stop`, etc.
+// but no `before_uninstall`/`after_uninstall` counterpart, and the runtime
+// cleanup reasons are `disable | reset | delete | restart` only (never
+// `uninstall`). Uninstall also removes the plugin's code, so any cleanup a
+// plugin registered could not reliably run at/after uninstall anyway.
+//
+// The built-in `openclaw plugins uninstall <id>` already performs the cleanup
+// that matters: its `removePluginFromConfig` deletes the plugin's
+// `plugins.entries.<id>` block (which holds the API key) plus `plugins.allow`,
+// `plugins.installs`, `plugins.load.paths` and slot entries. The only residue
+// it does not remove is the `tools.alsoAllow` entry (`"apify"` /
+// `"group:plugins"`), which is harmless once the plugin/tool is gone and can be
+// removed by hand. So cleanup integrates with the built-in command rather than
+// a bespoke one — see README "Uninstall / cleanup".
 
 // ---------------------------------------------------------------------------
 // readline helpers (following OuraClaw pattern)
@@ -52,13 +72,6 @@ export function registerCli(api: OpenClawPluginApi): void {
         .command("test")
         .description("Test Apify API connection")
         .action(async () => runStatusCommand(api));
-
-      apify
-        .command("uninstall")
-        .description(
-          "Remove Apify plugin configuration written by `apify setup` (API key, allowlist entries)",
-        )
-        .action(async () => runUninstallCommand(api));
     },
     { commands: ["apify"] },
   );
@@ -138,106 +151,6 @@ async function applyConfigChanges(
       }
     },
   });
-}
-
-/**
- * Reverse of {@link applyConfigChanges}: surgically remove everything
- * `openclaw apify setup` wrote for this plugin from an OpenClaw config draft.
- *
- * It mutates `cfg` in place and returns the list of removed config keys (for
- * user-facing output). Exported so it can be unit-tested against plain config
- * objects without a live runtime.
- *
- * Safety rules (see issue #39 — "do not delete any other config"):
- *  - `plugins.entries[pluginId]` is deleted (this holds the API key + config).
- *  - `pluginId` is filtered out of `plugins.allow` (other ids are kept).
- *  - `tools.alsoAllow`: the bare `"apify"` tool name is apify-owned and always
- *    removed; `"group:plugins"` is SHARED by every plugin and is removed ONLY
- *    when no other plugin entries remain (i.e. Apify was the last/only plugin),
- *    so we never disable other plugins' tools.
- *
- * The function is idempotent and defensive: it tolerates missing `plugins`,
- * `plugins.entries`, `plugins.allow`, `tools`, and `tools.alsoAllow`, and never
- * deletes the parent `plugins` / `tools` containers or entries it does not own.
- */
-export function removeApifyConfigFromDraft(
-  cfg: OpenClawConfig,
-  pluginId: string,
-): { removed: string[] } {
-  const removed: string[] = [];
-  const plugins = cfg.plugins;
-
-  // 1. Plugin entry — contains the API key and all other apify config.
-  if (plugins?.entries && Object.prototype.hasOwnProperty.call(plugins.entries, pluginId)) {
-    delete plugins.entries[pluginId];
-    removed.push(`plugins.entries.${pluginId}`);
-    // Leave an emptied `entries` object as-is; never delete the parent `plugins`.
-  }
-
-  // 2. Plugin allowlist — drop exact matches of this plugin id, keep the rest.
-  if (plugins && Array.isArray(plugins.allow) && plugins.allow.includes(pluginId)) {
-    plugins.allow = plugins.allow.filter((id) => id !== pluginId);
-    removed.push(`plugins.allow[${pluginId}]`);
-  }
-
-  // 3. tools.alsoAllow — remove only the entries setup added, safely.
-  const tools = cfg.tools;
-  if (tools && Array.isArray(tools.alsoAllow)) {
-    // 3a. Bare "apify" tool name — apify-owned, always safe to remove.
-    if (tools.alsoAllow.includes("apify")) {
-      tools.alsoAllow = tools.alsoAllow.filter((t) => t !== "apify");
-      removed.push("tools.alsoAllow[apify]");
-    }
-    // 3b. "group:plugins" is shared across ALL plugins. Remove it only when no
-    // other plugin entries remain, otherwise other plugins rely on it.
-    const remainingEntries = plugins?.entries;
-    const noOtherPlugins = !remainingEntries || Object.keys(remainingEntries).length === 0;
-    if (noOtherPlugins && tools.alsoAllow.includes("group:plugins")) {
-      tools.alsoAllow = tools.alsoAllow.filter((t) => t !== "group:plugins");
-      removed.push("tools.alsoAllow[group:plugins]");
-    }
-  }
-
-  return { removed };
-}
-
-/**
- * Persist the removal of Apify config via the same host API `setup` uses.
- * Returns the list of removed config keys. Exported for unit testing with a
- * mocked `api.runtime.config.mutateConfigFile`.
- */
-export async function removeConfigChanges(api: OpenClawPluginApi): Promise<string[]> {
-  if (!api.runtime?.config?.mutateConfigFile) {
-    throw new Error("Config write API not available — update OpenClaw and retry.");
-  }
-
-  let removed: string[] = [];
-  await api.runtime.config.mutateConfigFile({
-    afterWrite: { mode: "restart", reason: "Remove Apify plugin config" },
-    mutate: (cfg) => {
-      removed = removeApifyConfigFromDraft(cfg, api.id).removed;
-    },
-  });
-  return removed;
-}
-
-function printManualUninstall(pluginId: string): void {
-  console.log("\n══════════════════════════════════════════");
-  console.log("  Manual cleanup — remove these keys from your OpenClaw config:\n");
-  console.log("  plugins:");
-  console.log("    entries:");
-  console.log(`      ${pluginId}:      # delete this entry (contains your API key)`);
-  console.log("    allow:");
-  console.log(`      - ${pluginId}    # delete this list entry`);
-  console.log();
-  console.log("  tools:");
-  console.log("    alsoAllow:");
-  console.log('      - apify           # delete if present');
-  console.log('      - group:plugins   # delete ONLY if Apify was your last plugin');
-  console.log();
-  console.log("  Leave every other entry untouched.");
-  console.log("  Then restart: openclaw gateway restart");
-  console.log("══════════════════════════════════════════\n");
 }
 
 function printManualConfig(
@@ -367,43 +280,6 @@ async function runSetupCommand(api: OpenClawPluginApi): Promise<void> {
     }
   } finally {
     rl.close();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// uninstall command
-// ---------------------------------------------------------------------------
-
-async function runUninstallCommand(api: OpenClawPluginApi): Promise<void> {
-  console.log("\n╔══════════════════════════════════════╗");
-  console.log("║     Apify Plugin Config Cleanup      ║");
-  console.log("╚══════════════════════════════════════╝\n");
-  console.log("  Removing the configuration written by 'openclaw apify setup'");
-  console.log("  (API key + allowlist entries). Unrelated config is left untouched.\n");
-
-  try {
-    process.stdout.write("  Updating config… ");
-    const removed = await removeConfigChanges(api);
-    console.log("done.\n");
-
-    if (removed.length === 0) {
-      console.log("  No Apify config found. Nothing to remove.\n");
-      return;
-    }
-
-    console.log("══════════════════════════════════════════");
-    console.log("  ✓ Removed:");
-    for (const key of removed) {
-      console.log(`      - ${key}`);
-    }
-    console.log();
-    console.log("  Restart OpenClaw to apply: openclaw gateway restart");
-    console.log("══════════════════════════════════════════\n");
-  } catch (err) {
-    console.log("failed.");
-    console.log(`\n  ✗ ${err instanceof Error ? err.message : String(err)}`);
-    console.log("\n  Falling back to manual cleanup instructions:");
-    printManualUninstall(api.id);
   }
 }
 

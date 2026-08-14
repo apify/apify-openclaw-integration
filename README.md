@@ -87,29 +87,22 @@ openclaw apify setup
 
 ## Uninstall / cleanup
 
-Uninstalling the plugin package removes the plugin itself:
+Uninstall the plugin with OpenClaw's built-in command:
 
 ```bash
 openclaw plugins uninstall @apify/apify-openclaw-plugin
 ```
 
-To also clean up the configuration that `openclaw apify setup` wrote (your Apify **API key**, the `plugins.allow` entry, and the `tools.alsoAllow` entry), run:
+Restart the Gateway afterwards (`openclaw gateway restart`).
 
-```bash
-openclaw apify uninstall
-```
+There is no separate cleanup command, and none is needed: OpenClaw has no plugin-uninstall lifecycle hook a plugin could attach cleanup to, so cleanup happens through this built-in command. `openclaw plugins uninstall` removes the plugin's own configuration automatically — including the `plugins.entries.<plugin-id>` block that stores your Apify **API key**, and the plugin's `plugins.allow` entry. Because your API key lives in that entry, uninstalling the plugin already removes it.
 
-Run it **before** uninstalling the plugin package, while the `apify` CLI is still available.
+The only thing the built-in command does **not** remove is the `tools.alsoAllow` entry that `openclaw apify setup` may have added (`apify`, or the shared `group:plugins`). It is harmless once the plugin is gone, but if you'd like a fully tidy config you can remove it by hand:
 
-This command is **surgical**: it removes only Apify-owned config and never touches unrelated config. Specifically it:
+- delete the bare `apify` entry from `tools.alsoAllow`;
+- delete the shared `group:plugins` entry **only if Apify was your last/only plugin** — leave it in place if other plugins are configured, since their tools rely on it.
 
-- deletes `plugins.entries.<plugin-id>` (which holds your API key and plugin config);
-- removes the plugin id from `plugins.allow`, leaving other plugin ids intact;
-- removes the bare `apify` entry from `tools.alsoAllow`, and removes the shared `group:plugins` entry **only when Apify was your last/only plugin** — if other plugins are configured it is left in place so their tools keep working.
-
-Restart the Gateway afterwards (`openclaw gateway restart`). If the config-write API is unavailable, the command prints the exact keys to delete by hand instead.
-
-If you already removed the plugin package (so `openclaw apify uninstall` is gone), delete those same keys from your OpenClaw config file manually: `plugins.entries.<plugin-id>`, the `plugins.allow` entry, and — only if Apify was your last plugin — the `tools.alsoAllow` `group:plugins` entry.
+Leave every other entry untouched, then restart the Gateway (`openclaw gateway restart`).
 
 ## apify
 
