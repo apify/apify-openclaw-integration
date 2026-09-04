@@ -90,8 +90,27 @@ jobs:
           npm install "openclaw@${{ matrix.version }}"
           echo "::endgroup::"
 
-          echo "::group::openclaw plugins install $PLUGIN_SPEC"
-          npx --no-install openclaw plugins install "$PLUGIN_SPEC"
+          # OpenClaw 2026.8.1 hardened `plugins install` with two non-interactive
+          # gates that abort in CI (no TTY to prompt):
+          #   * `--force`               — confirm a non-ClawHub source (our tarball /
+          #                               `@latest` npm spec are both outside ClawHub).
+          #   * `--accept-capabilities` — consent to the plugin's declared capabilities.
+          # Older matrix versions (e.g. 2026.6.34, 2026.7.1-2) DON'T know
+          # `--accept-capabilities` and hard-fail with "OpenClaw does not recognize
+          # option ..." if it's passed. So we feature-detect each flag from the
+          # install `--help` text and only pass what the installed version supports.
+          # This self-adjusts as the matrix rotates forward — no version table to keep.
+          install_help=$(npx --no-install openclaw plugins install --help 2>&1 || true)
+          install_flags=()
+          if grep -q -- '--force' <<<"$install_help"; then
+            install_flags+=("--force")
+          fi
+          if grep -q -- '--accept-capabilities' <<<"$install_help"; then
+            install_flags+=("--accept-capabilities")
+          fi
+
+          echo "::group::openclaw plugins install $PLUGIN_SPEC ${install_flags[*]}"
+          npx --no-install openclaw plugins install "$PLUGIN_SPEC" "${install_flags[@]}"
           echo "::endgroup::"
 
           # `plugins list` is echoed for diagnostics only — its formatted table
